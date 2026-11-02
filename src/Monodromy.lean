@@ -10,4 +10,5 @@ public import Monodromy.Paths
 A root is memory. A path computes by carrying that root.
 Control and parameter paths follow the same lifting rule.
 On regular differentiable traces, its differential law agrees with transport.
+The inner root steers an autonomous flow.
 -/

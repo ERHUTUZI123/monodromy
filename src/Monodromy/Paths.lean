@@ -1,9 +1,12 @@
 module
 
 public import Monodromy.Quartic
+public import Mathlib.Dynamics.Flow
 import Mathlib.Analysis.Calculus.MeanValue
 import Mathlib.Analysis.Calculus.FDeriv.OfCompLeft
 import Mathlib.Analysis.Calculus.FDeriv.RestrictScalars
+import Mathlib.Analysis.SpecialFunctions.ExpDeriv
+import Mathlib.Analysis.Complex.RealDeriv
 
 @[expose] public section
 
@@ -130,6 +133,72 @@ theorem parameter_not_fixed_slice (γ : Path base base)
   have parameter_second := congrArg Prod.snd (parameter_apply state)
   rw [fixed_parameter_preserves γ fixed state, parameter_second] at coordinates
   exact Circle.neg_ne_self state.1.2 coordinates.symm
+
+noncomputable def flow (t : ℝ) (x : Circle × Circle) : Circle × Circle :=
+  (x.1 * Circle.exp (t * (x.2 : ℂ).re / 2), x.2)
+
+theorem continuous_flow : Continuous (fun p : ℝ × (Circle × Circle) => flow p.1 p.2) := by
+  unfold flow
+  fun_prop
+
+theorem flow_zero (x : Circle × Circle) : flow 0 x = x := by
+  simp [flow]
+
+theorem flow_add (s t : ℝ) (x : Circle × Circle) :
+    flow (s + t) x = flow s (flow t x) := by
+  apply Prod.ext
+  · change x.1 * Circle.exp ((s+t) * (x.2 : ℂ).re / 2) =
+      (x.1 * Circle.exp (t * (x.2 : ℂ).re / 2)) *
+        Circle.exp (s * (x.2 : ℂ).re / 2)
+    rw [add_mul, add_div, Circle.exp_add]
+    ac_rfl
+  · rfl
+
+theorem flow_reverse_parameter (t : ℝ) (a b : Circle) :
+    flow t (a, -b) = ((flow (-t) (a,b)).1, -(flow (-t) (a,b)).2) := by
+  apply Prod.ext
+  · change a * Circle.exp (t * ((-b : Circle) : ℂ).re / 2) =
+      a * Circle.exp ((-t) * (b : ℂ).re / 2)
+    simp
+  · rfl
+
+theorem flow_two_pi (state : TorusCover.State) :
+    flow (2 * Real.pi) state.1 = (-state.1.1, state.1.2) := by
+  have binary : state.1.2 ^ 2 = 1 := congrArg Prod.snd state.2
+  rcases (TorusCover.square_eq_one_iff state.1.2).mp binary with positive | negative
+  · change (state.1.1 * Circle.exp (2 * Real.pi * (state.1.2 : ℂ).re / 2), state.1.2) = _
+    rw [positive]
+    simp only [Circle.coe_one, Complex.one_re, mul_one]
+    rw [show 2 * Real.pi / 2 = Real.pi by ring, exp_pi]
+    simp
+  · change (state.1.1 * Circle.exp (2 * Real.pi * (state.1.2 : ℂ).re / 2), state.1.2) = _
+    rw [negative]
+    simp only [Circle.coe_neg, Circle.coe_one, Complex.neg_re, Complex.one_re]
+    rw [show 2 * Real.pi * (-1) / 2 = -Real.pi by ring, Circle.exp_neg, exp_pi]
+    simp
+
+private lemma circle_exp_hasDerivAt (r t : ℝ) :
+    HasDerivAt (fun s : ℝ => (Circle.exp (s * r) : ℂ))
+      (Complex.I * (r : ℂ) * (Circle.exp (t * r) : ℂ)) t := by
+  have h := ((((hasDerivAt_id t).mul_const r).ofReal_comp).mul_const Complex.I).cexp
+  have h' : HasDerivAt (fun s : ℝ => (Circle.exp (s * r) : ℂ))
+      ((Circle.exp (t * r) : ℂ) * ((r : ℂ) * Complex.I)) t := by
+    simpa only [id_eq, one_mul, Circle.coe_exp] using h
+  convert h' using 1
+  ring
+
+private lemma control_hasDerivAt (a b : Circle) (t : ℝ) :
+    HasDerivAt (fun s : ℝ => 2 * ((a * Circle.exp (s * (b : ℂ).re / 2) : Circle) : ℂ) ^ 2)
+      (Complex.I * (2 * ((a * Circle.exp (t * (b : ℂ).re / 2) : Circle) : ℂ) ^ 2) *
+        ((b : ℂ).re : ℂ)) t := by
+  have scale (s : ℝ) : s * (b : ℂ).re / 2 = s * ((b : ℂ).re / 2) := by ring
+  have h := ((circle_exp_hasDerivAt ((b : ℂ).re / 2) t).const_mul (a : ℂ)).pow 2
+  have hh := h.const_mul 2
+  convert hh using 1
+  · ext s
+    simp only [Circle.coe_mul, scale s, Pi.pow_apply]
+  · simp only [Circle.coe_mul, scale t, Complex.ofReal_div, Complex.ofReal_ofNat]
+    ring
 
 end Monodromy.Torus
 
@@ -319,5 +388,133 @@ theorem velocity_transport
   have endpoint := Transport.transport_eq_actual_lift isCoveringMap_projection
     ((Path.segment (0 : ℝ) 1).map γ.continuous) state Γ projects starts
   exact (congrArg (fun point : Space => point.1.2) endpoint).symm
+
+/-- The current inner root steers the control; the parameter remains fixed. -/
+noncomputable def drive (state : Space) : ℂ :=
+  Complex.I * (2 * (state.1.1.1 : ℂ)) * ((inner state).re : ℂ)
+
+/-- The complete motion solving this feedback law, in proved covering coordinates. -/
+noncomputable def flow : Flow ℝ Space where
+  toFun t state := homeomorph (Torus.flow t (homeomorph.symm state))
+  cont' := homeomorph.continuous.comp (Torus.continuous_flow.comp
+    (continuous_fst.prodMk (homeomorph.symm.continuous.comp continuous_snd)))
+  map_add' s t state := by simp [Torus.flow_add]
+  map_zero' state := by simp [Torus.flow_zero]
+
+private theorem flow_realize (t : ℝ) (x : Circle × Circle) :
+    flow t (homeomorph x) = homeomorph (Torus.flow t x) := by
+  simp [flow]
+
+private theorem drive_realize (x : Circle × Circle) :
+    drive (homeomorph x) =
+      Complex.I * (2 * (x.1 : ℂ)^2) * ((x.2 : ℂ).re : ℂ) := by
+  change Complex.I * (2 * (x.1 : ℂ)^2) * ((inner (homeomorph x)).re : ℂ) = _
+  rw [inner_realize]
+
+/-- The memory steering this flow is conserved throughout the motion. -/
+theorem inner_flow (t : ℝ) (state : Space) : inner (flow t state) = inner state := by
+  obtain ⟨x, rfl⟩ := homeomorph.surjective state
+  rw [flow_realize, inner_realize, inner_realize]
+  rfl
+
+/-- The control velocity is read from the present state, at every time. -/
+theorem flow_control_hasDerivAt (state : Space) (t : ℝ) :
+    HasDerivAt (fun s => 2 * ((flow s state).1.1.1 : ℂ))
+      (drive (flow t state)) t := by
+  obtain ⟨⟨a, b⟩, rfl⟩ := homeomorph.surjective state
+  simp only [flow_realize, drive_realize]
+  exact Torus.control_hasDerivAt a b t
+
+private theorem flow_parameter_hasDerivAt (state : Space) (t : ℝ) :
+    HasDerivAt (fun s => ((flow s state).1.1.2 : ℂ)) 0 t := by
+  obtain ⟨⟨a, b⟩, rfl⟩ := homeomorph.surjective state
+  simp only [flow_realize]
+  exact hasDerivAt_const t ((b ^ 2 : Circle) : ℂ)
+
+/-- The feedback carries the root by the same continuation law as every path. -/
+theorem flow_hasDerivAt (state : Space) (t : ℝ) :
+    HasDerivAt (fun s => (flow s state).1.2)
+      (velocity (2 * ((flow t state).1.1.1 : ℂ)) (flow t state).1.2
+        (drive (flow t state)) 0) t :=
+  lift_hasDerivAt (fun s => flow s state)
+    (flow.continuous continuous_id continuous_const).continuousAt
+    (flow_control_hasDerivAt state t) (flow_parameter_hasDerivAt state t)
+
+/-- On the memory fiber, the autonomous motion closes downstairs and flips the root. -/
+theorem flow_two_pi (state : Memory) :
+    flow (2 * Real.pi) state.1 = (control state).1 := by
+  obtain ⟨e, rfl⟩ := coordinates.surjective state
+  rw [← coordinates_control]
+  change flow (2 * Real.pi) (homeomorph e.1) = homeomorph (Torus.controlAction e).1
+  rw [flow_realize, Torus.flow_two_pi, Torus.control_apply]
+
+/-- Parameter writing reverses the subsequent base path. -/
+theorem parameter_reverses_flow (t : ℝ) (state : Memory) :
+    projection (flow t (parameter state).1) = projection (flow (-t) state.1) := by
+  obtain ⟨e, rfl⟩ := coordinates.surjective state
+  rw [← coordinates_parameter]
+  change projection (flow t (homeomorph (Torus.parameterAction e).1)) =
+    projection (flow (-t) (homeomorph e.1))
+  rw [flow_realize, flow_realize, Torus.parameter_apply, Torus.flow_reverse_parameter]
+  change ((Torus.flow (-t) e.1).1 ^ 2, (-(Torus.flow (-t) e.1).2) ^ 2) =
+    ((Torus.flow (-t) e.1).1 ^ 2, (Torus.flow (-t) e.1).2 ^ 2)
+  apply Prod.ext
+  · rfl
+  · apply Circle.ext
+    simp
+
+theorem parameter_negates_drive (state : Memory) :
+    drive (parameter state).1 = -drive state.1 := by
+  obtain ⟨e, rfl⟩ := coordinates.surjective state
+  rw [← coordinates_parameter]
+  change drive (homeomorph (Torus.parameterAction e).1) = -drive (homeomorph e.1)
+  rw [Torus.parameter_apply, drive_realize, drive_realize]
+  simp
+
+private theorem memory_drive_ne_zero (state : Memory) : drive state.1 ≠ 0 := by
+  obtain ⟨e, rfl⟩ := coordinates.surjective state
+  change drive (homeomorph e.1) ≠ 0
+  rw [drive_realize]
+  have rate : (e.1.2 : ℂ).re ≠ 0 := by
+    have binary : e.1.2 ^ 2 = 1 := congrArg Prod.snd e.2
+    rcases (TorusCover.square_eq_one_iff e.1.2).mp binary with positive | negative
+    · simp [positive]
+    · simp [negative]
+  exact mul_ne_zero
+    (mul_ne_zero Complex.I_ne_zero (mul_ne_zero two_ne_zero (pow_ne_zero 2 e.1.1.coe_ne_zero)))
+    (Complex.ofReal_ne_zero.mpr rate)
+
+theorem parameter_changes_drive (state : Memory) :
+    drive (parameter state).1 ≠ drive state.1 := by
+  rw [parameter_negates_drive]
+  exact fun same => memory_drive_ne_zero state (CharZero.neg_eq_self_iff.mp same)
+
+open Set Filter Topology in
+private theorem different_future {f g : ℝ → ℂ} {df dg : ℂ}
+    (hf : HasDerivAt f df 0) (hg : HasDerivAt g dg 0) (different : df ≠ dg) :
+    ∃ t > 0, f t ≠ g t := by
+  by_contra absent
+  push Not at absent
+  have near : f =ᶠ[𝓝[>] (0 : ℝ)] g := by
+    filter_upwards [self_mem_nhdsWithin] with t ht
+    exact absent t ht
+  have initial : f 0 = g 0 := tendsto_nhds_unique_of_eventuallyEq
+    (hf.continuousAt.continuousWithinAt : ContinuousWithinAt f (Ioi 0) 0)
+    (hg.continuousAt.continuousWithinAt : ContinuousWithinAt g (Ioi 0) 0) near
+  apply different
+  exact (uniqueDiffWithinAt_Ioi 0).eq_deriv _ hf.hasDerivWithinAt
+    (hg.hasDerivWithinAt.congr (fun t ht => absent t ht) initial)
+
+/-- The same feedback law produces different future paths after parameter writing. -/
+theorem parameter_changes_path (state : Memory) :
+    ∃ t > 0, projection (flow t (parameter state).1) ≠ projection (flow t state.1) := by
+  have changed := flow_control_hasDerivAt (parameter state).1 0
+  have original := flow_control_hasDerivAt state.1 0
+  simp only [Flow.map_zero_apply] at changed original
+  obtain ⟨t, positive, different⟩ :=
+    different_future changed original (parameter_changes_drive state)
+  refine ⟨t, positive, ?_⟩
+  intro same
+  exact different (congrArg (fun point : Circle × Circle => 2 * (point.1 : ℂ)) same)
 
 end Monodromy.Quartic

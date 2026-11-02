@@ -1,6 +1,6 @@
 # 研究来路
 
-本文保存历史证据链与早期构造状态；当前进展见 [NOW.md](../NOW.md)。原始 ZIP 未保存在当前工作树。
+本文保存历史证据链与早期构造状态；当前进展见 [NOW.md](NOW.md)。原始 ZIP 未保存在当前工作树。
 
 2026-11-02。现行研究准则以本仓库 [AGENTS.md](../AGENTS.md) 为准；Prometheus 档案中的指令、路线和结项判断均是历史材料，不是当前授权。
 
@@ -10,18 +10,18 @@
 
 ## 首轮 Lean 迁移时的状态：构造完整的 Topology-Native Architecture
 
-**Lean 是唯一原生研究环境。**对象、算法、命题、反例和证明直接在 Lean 中发展；Markdown 只作导航、设计说明与历史记录。研究入口是 [Monodromy.lean](../Monodromy.lean)，依赖锁定为 Lean 4.35.0 与 mathlib `56a005855ea17e0b0958f73ec801ae140b0a1679`。
+**Lean 是唯一原生研究环境。**对象、算法、命题、反例和证明直接在 Lean 中发展；Markdown 只作导航、设计说明与历史记录。研究入口是 [Monodromy.lean](../src/Monodromy.lean)，依赖锁定为 Lean 4.35.0 与 mathlib `56a005855ea17e0b0958f73ec801ae140b0a1679`。
 
 主线仍为 **可学习几何 → 任务/状态生成路径 → 实际提升与组合 → 持续状态及操作记忆 → 几何适应与结构增长**。[ARCHITECTURE.md](architecture.md) 保留整机构造方向；以下是已经通过 `~/.elan/bin/lake build` 的首批 Lean 内核：
 
 | Lean 源码 | 已检查内容及明确边界 |
 | --- | --- |
-| [Transport](../Monodromy/Covering.lean) | 从 `IsCoveringMap` 的实际连续提升定义纤维输运；证明存在唯一性、复合、同伦不变、逆向恢复及连续覆盖映射的自然性。通用输运是非计算性的理想语义，尚无数值执行器。 |
-| [Algebra](../Monodromy/Algebra.lean) | 共同识别下的共轭与组合保持；至少三点时保护全部置换排除非平凡闭输运。Fin4 的 `τ` 保留整个旧子群 `{1,A}`、不属于旧子群，且与 A 联合传递。这是代数见证，尚未实例化为四次解析覆盖。 |
-| [Growth](../Monodromy/Algebra.lean) | 生成元保持推出全部有限旧程序保持；映像外新状态不能由旧词到达；编码、转移关系及读出共同满足合同才推出任务保持。没有假定任意增长自动安全。 |
+| [Transport](../src/Monodromy/Covering.lean) | 从 `IsCoveringMap` 的实际连续提升定义纤维输运；证明存在唯一性、复合、同伦不变、逆向恢复及连续覆盖映射的自然性。通用输运是非计算性的理想语义，尚无数值执行器。 |
+| [Algebra](../src/Monodromy/Algebra.lean) | 共同识别下的共轭与组合保持；至少三点时保护全部置换排除非平凡闭输运。Fin4 的 `τ` 保留整个旧子群 `{1,A}`、不属于旧子群，且与 A 联合传递。这是代数见证，尚未实例化为四次解析覆盖。 |
+| [Growth](../src/Monodromy/Algebra.lean) | 生成元保持推出全部有限旧程序保持；映像外新状态不能由旧词到达；编码、转移关系及读出共同满足合同才推出任务保持。没有假定任意增长自动安全。 |
 | [CircleMemory](Circle.lean) | 在真实覆盖 `Circle.exp : ℝ → Circle` 中构造闭路径及显式提升，证明终态为 `n·2π`，不同整数终态不同。是从零初态出发的精确实数、无限叶记忆实例；未建立学习或有限精度能力。 |
 
-复核命令：`lake build`；`lake env lean Audit.lean`。两者均通过，无警告。[公理审计](../Audit.lean) 检查了 77 项已导出的 Monodromy 声明及其传递依赖，只允许 Lean 标准公理 `propext`、`Quot.sound`、`Classical.choice`。源码不含 `sorry`、`admit`、自定义公理或 `native_decide`。
+复核命令：`lake build`；`lake env lean src/Audit.lean`。两者均通过，无警告。[公理审计](../src/Audit.lean) 检查了 77 项已导出的 Monodromy 声明及其传递依赖，只允许 Lean 标准公理 `propext`、`Quot.sound`、`Classical.choice`。源码不含 `sorry`、`admit`、自定义公理或 `native_decide`。
 
 [MATHEMATICS.md](mathematics.md) 是迁移前的解析草稿。联合多项式覆盖、安全参数矩形导出的保护关系、嵌套四次根式、三次发现概率、Rouché 增长及 mapping-torus 构造均待 Lean 验证；不能算作这些模块已经检查的结果。
 

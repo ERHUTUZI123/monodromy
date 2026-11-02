@@ -251,6 +251,16 @@ noncomputable def homeomorph : (Circle × Circle) ≃ₜ Space :=
 
 def projection (state : Space) : Circle × Circle := state.1.1
 
+/-- The inner root, recovered from the carried root and control. -/
+noncomputable def inner (state : Space) : ℂ :=
+  state.1.2 ^ 2 - 2 * (state.1.1.1 : ℂ)
+
+@[simp] theorem inner_realize (x : Circle × Circle) :
+    inner (homeomorph x) = (x.2 : ℂ) := by
+  change root x.1 x.2 ^ 2 - 2 * (x.1 : ℂ)^2 = (x.2 : ℂ)
+  rw [root_sq]
+  ring
+
 theorem isCoveringMap_projection : IsCoveringMap projection := by
   have covering := TorusCover.isCoveringMap_projection.comp_homeomorph homeomorph.symm
   convert covering using 1

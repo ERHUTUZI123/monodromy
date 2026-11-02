@@ -4,7 +4,7 @@ import Monodromy
 import Lean.Util.CollectAxioms
 import Lean.Elab.Command
 
-/-! Run `lake env lean Audit.lean` to check the axioms of every exported
+/-! Run `lake env lean src/Audit.lean` to check the axioms of every exported
 Monodromy declaration, including its transitive proof dependencies. -/
 
 open Lean Elab Command in

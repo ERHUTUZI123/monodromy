@@ -3,6 +3,7 @@ import Lake
 open Lake DSL
 
 package monodromy where
+  srcDir := "src"
   leanOptions := #[⟨`autoImplicit, false⟩, ⟨`warningAsError, true⟩]
 
 require mathlib from git
