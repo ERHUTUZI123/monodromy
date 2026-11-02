@@ -322,4 +322,63 @@ theorem derivative_eq_velocity {u θ z : ℝ → ℂ} {t : ℝ} {du dθ dz : ℂ
     4 * z t * (z t ^ 2 - u t) * dz - (2 * (z t ^ 2 - u t) * du + dθ) =
         4 * z t * (z t ^ 2 - u t) * dz - 2 * (z t ^ 2 - u t) * du - dθ := by ring
     _ = 0 := balance
+private theorem recover_outer (x : Circle × Circle) :
+    (homeomorph x).1.2 / (Complex.sqrt 2 * Complex.sqrt
+      (1 + inner (homeomorph x) / (2 * ((homeomorph x).1.1.1 : ℂ)))) = (x.1 : ℂ) := by
+  change root x.1 x.2 / (Complex.sqrt 2 * Complex.sqrt
+    (1 + inner (homeomorph x) / (2 * (x.1 : ℂ)^2))) = (x.1 : ℂ)
+  rw [inner_realize]
+  have regular :
+      (Complex.sqrt 2 * (x.1 : ℂ)) *
+        Complex.sqrt (1 + (x.2 : ℂ) / (2 * (x.1 : ℂ)^2)) ≠ 0 :=
+    root_ne_zero x.1 x.2
+  have denominator := mul_ne_zero
+    (mul_ne_zero_iff.mp (mul_ne_zero_iff.mp regular).1).1
+    (mul_ne_zero_iff.mp regular).2
+  apply (div_eq_iff denominator).mpr
+  dsimp [root]
+  ring
+
+/-- The outer phase, recovered directly from the root and its inner branch. -/
+noncomputable def outer (state : Space) : Circle :=
+  ⟨state.1.2 / (Complex.sqrt 2 * Complex.sqrt
+    (1 + inner state / (2 * (state.1.1.1 : ℂ)))), by
+      apply mem_sphere_zero_iff_norm.mpr
+      obtain ⟨x, rfl⟩ := homeomorph.surjective state
+      rw [recover_outer]
+      exact x.1.norm_coe⟩
+
+@[simp] theorem outer_realize (x : Circle × Circle) :
+    outer (homeomorph x) = x.1 := Circle.ext (recover_outer x)
+
+theorem continuous_outer : Continuous outer := by
+  apply (continuous_fst.comp homeomorph.symm.continuous).congr
+  intro state
+  obtain ⟨x, rfl⟩ := homeomorph.surjective state
+  simp
+
+/-- A phase weight; its geometric meaning on the unit circle is squared overlap. -/
+noncomputable def weight (phase : ℂ) : ℝ := (1 + phase.re) / 2
+
+theorem weight_geometry (phase : Circle) :
+    weight phase = ‖(1 : ℂ) + (phase : ℂ)‖ ^ 2 / 4 := by
+  rw [Complex.sq_norm, Complex.normSq_add]
+  simp only [map_one, Circle.normSq_coe, one_mul, Complex.conj_re]
+  dsimp [weight]
+  ring
+
+theorem weight_bounds (phase : Circle) : 0 ≤ weight phase ∧ weight phase ≤ 1 := by
+  have bounded := Complex.abs_re_le_norm (phase : ℂ)
+  rw [phase.norm_coe] at bounded
+  obtain ⟨lower, upper⟩ := abs_le.mp bounded
+  dsimp [weight]
+  constructor <;> linarith
+
+theorem weight_complement (phase : ℂ) : weight (-phase) = 1 - weight phase := by
+  simp only [weight, Complex.neg_re]
+  ring
+
+@[simp] theorem weight_one : weight 1 = 1 := by norm_num [weight]
+@[simp] theorem weight_neg_one : weight (-1) = 0 := by norm_num [weight]
+
 end Monodromy.Quartic

@@ -1,6 +1,6 @@
 module
 
-public import Monodromy.Paths
+public import Monodromy.Flows
 
 /-!
 # Monodromy

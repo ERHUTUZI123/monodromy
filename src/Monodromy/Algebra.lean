@@ -3,6 +3,8 @@ module
 public import Mathlib.GroupTheory.Perm.Basic
 public import Mathlib.Data.Fintype.Card
 public import Mathlib.Algebra.Group.Subgroup.Defs
+public import Mathlib.GroupTheory.Perm.Closure
+public import Mathlib.GroupTheory.Perm.Cycle.Factors
 
 @[expose] public section
 
@@ -277,3 +279,65 @@ theorem task_retention
     (run_relation relation closed word _ _ (encodings input))
 
 end Monodromy.Growth
+
+/-!
+# Conditional actions
+
+Each coordinate can select a flip of the other. The correspondence with
+actual root states belongs to the geometric construction.
+-/
+
+namespace Monodromy.Logic
+
+abbrev Bits := Bool × Bool
+
+def control : Equiv.Perm Bits := Equiv.swap (false, false) (true, false)
+
+def write : Equiv.Perm Bits := Equiv.swap (false, false) (false, true)
+
+def old : Equiv.Perm Bits :=
+  Equiv.swap (false, false) (true, false) * Equiv.swap (false, true) (true, true)
+
+theorem control_apply (a b : Bool) : control (a, b) = (if b then a else !a, b) := by
+  cases a <;> cases b <;> decide
+
+theorem write_apply (a b : Bool) : write (a, b) = (a, if a then b else !b) := by
+  cases a <;> cases b <;> decide
+
+theorem old_apply (a b : Bool) : old (a, b) = (!a, b) := by
+  cases a <;> cases b <;> decide
+
+theorem control_involution : control * control = 1 := by decide
+
+theorem write_involution : write * write = 1 := by decide
+
+theorem closed_noncommutation : control * write ≠ write * control := by decide
+
+private def cycle : Equiv.Perm Bits := control * write * (old * control)
+
+private theorem cycle_isCycle : cycle.IsCycle := by
+  unfold Equiv.Perm.IsCycle
+  decide
+
+private theorem cycle_support : cycle.support = Finset.univ := by decide
+
+private theorem cycle_initial : cycle (false, false) = (false, true) := by decide
+
+/-- The conditional flips and the old flip generate every permutation of the four states. -/
+theorem generates_all : Subgroup.closure ({control, write, old} : Set (Equiv.Perm Bits)) = ⊤ := by
+  let H := Subgroup.closure ({control, write, old} : Set (Equiv.Perm Bits))
+  have hc : control ∈ H := Subgroup.subset_closure (by simp)
+  have hw : write ∈ H := Subgroup.subset_closure (by simp)
+  have ho : old ∈ H := Subgroup.subset_closure (by simp)
+  have hs : cycle ∈ H := H.mul_mem (H.mul_mem hc hw) (H.mul_mem ho hc)
+  have generator := Equiv.Perm.closure_cycle_adjacent_swap cycle_isCycle cycle_support (false, false)
+  have inside : Subgroup.closure ({cycle, Equiv.swap (false, false) (cycle (false, false))} :
+      Set (Equiv.Perm Bits)) ≤ H := by
+    rw [Subgroup.closure_le, Set.insert_subset_iff, Set.singleton_subset_iff]
+    refine ⟨hs, ?_⟩
+    rw [cycle_initial]
+    exact hw
+  rw [generator] at inside
+  exact top_unique inside
+
+end Monodromy.Logic

@@ -45,6 +45,6 @@ Lean 已检查：方程空间确为覆盖，基点纤维恰有四个根。控制
 
 ## 复核与来路
 
-复核命令：`lake build`；`lake env lean src/Audit.lean`。工具链与依赖固定于 [lean-toolchain](../lean-toolchain) 和 [lake-manifest.json](../lake-manifest.json)。
+`lake build` 与 `lake env lean src/Audit.lean` 均通过。公理检查只允许 Lean 标准公理，无占位证明。工具链与依赖固定于 [lean-toolchain](../lean-toolchain) 和 [lake-manifest.json](../lake-manifest.json)。
 
 [研究来路](history.md) 保存档案证据、失败与对照。历史实验没有建立 Monodromy 的独立优势；当前构造也没有作此声称。旧架构与解析草稿留在 [docs/](.)。本轮只进行了 Lean 构造与证明检查，未启动训练或新实验。
