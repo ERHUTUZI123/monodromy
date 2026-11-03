@@ -1,7 +1,9 @@
 module
 
 public import Monodromy.Choice
+public import Monodromy.SelfEmbedding
 public import Mathlib.Data.Fin.Basic
+public import Mathlib.Data.List.OfFn
 public import Mathlib.Analysis.SpecialFunctions.Complex.Circle
 public import Mathlib.RingTheory.RootsOfUnity.Complex
 public import Mathlib.Analysis.Calculus.Deriv.Pow
@@ -332,3 +334,198 @@ theorem prepend_append (first second : List (Fin a)) (x : ℝ) :
   ring
 
 end Monodromy.Radix.Stack
+
+namespace Monodromy.SelfEmbedding.Integer
+
+def dilation (a : ℕ) : Multiplicative ℤ →* Multiplicative ℤ :=
+  ({ toFun := fun x : ℤ => ((a + 1 : ℕ) : ℤ) * x
+     map_zero' := by simp
+     map_add' := by intros; ring } : ℤ →+ ℤ).toMultiplicative
+
+def digit {a : ℕ} (letter : Fin a) : Multiplicative ℤ :=
+  Multiplicative.ofAdd ((letter.val + 1 : ℕ) : ℤ)
+
+theorem dilation_injective (a : ℕ) : Function.Injective (dilation a) := by
+  intro first second same
+  change (((a + 1 : ℕ) : ℤ) * first.toAdd) = (((a + 1 : ℕ) : ℤ) * second.toAdd) at same
+  have values : first.toAdd = second.toAdd :=
+    mul_left_cancel₀ (by exact_mod_cast Nat.succ_ne_zero a) same
+  exact congrArg Multiplicative.ofAdd values
+
+/-- The first quotient in the self-embedding tower is precisely the residue class. -/
+theorem coset_eq_iff_mod_eq (a : ℕ) (first second : Multiplicative ℤ) :
+    (first : Multiplicative ℤ ⧸ (dilation a).range) = second ↔
+      first.toAdd % ((a + 1 : ℕ) : ℤ) = second.toAdd % ((a + 1 : ℕ) : ℤ) := by
+  constructor
+  · intro same
+    obtain ⟨value, relation⟩ := QuotientGroup.eq.mp same
+    change ((a + 1 : ℕ) : ℤ) * value.toAdd = -first.toAdd + second.toAdd at relation
+    have addition : ((a + 1 : ℕ) : ℤ) * value.toAdd + first.toAdd = second.toAdd := by omega
+    have residues := congrArg (fun n : ℤ => n % ((a + 1 : ℕ) : ℤ)) addition
+    simpa only [Int.mul_add_emod_self_left] using residues
+  · intro residues
+    have divides : ((a + 1 : ℕ) : ℤ) ∣ second.toAdd - first.toAdd := by
+      apply Int.dvd_iff_emod_eq_zero.mpr
+      simp only [Int.sub_emod, residues, sub_self, Int.zero_emod]
+    obtain ⟨value, relation⟩ := divides
+    apply QuotientGroup.eq.mpr
+    refine ⟨Multiplicative.ofAdd value, ?_⟩
+    change ((a + 1 : ℕ) : ℤ) * value = -first.toAdd + second.toAdd
+    omega
+
+theorem digit_outside {a : ℕ} (letter : Fin a) : digit letter ∉ (dilation a).range := by
+  rintro ⟨value, same⟩
+  change ((a + 1 : ℕ) : ℤ) * value.toAdd = ((letter.val + 1 : ℕ) : ℤ) at same
+  have residue := congrArg (fun x : ℤ => x % ((a + 1 : ℕ) : ℤ)) same
+  have bound := letter.isLt
+  rw [Int.mul_emod_right, Int.emod_eq_of_lt (by omega) (by omega)] at residue
+  omega
+
+theorem digit_separated {a : ℕ} :
+    Function.Injective (fun letter : Fin a => (digit letter : Multiplicative ℤ ⧸ (dilation a).range)) := by
+  intro first second same
+  rw [coset_eq_iff_mod_eq] at same
+  change ((first.val + 1 : ℕ) : ℤ) % ((a + 1 : ℕ) : ℤ) =
+    ((second.val + 1 : ℕ) : ℤ) % ((a + 1 : ℕ) : ℤ) at same
+  have first_bound := first.isLt
+  have second_bound := second.isLt
+  rw [Int.emod_eq_of_lt (by omega) (by omega),
+    Int.emod_eq_of_lt (by omega) (by omega)] at same
+  exact Fin.ext (by omega)
+
+theorem tags_injective (a : ℕ) : Function.Injective (tag (dilation a) (digit (a := a))) :=
+  tag_injective (dilation a) digit digit_outside digit_separated
+
+theorem encoded_word {a : ℕ} (word : List (Fin a)) :
+    (encode (dilation a) digit word).toAdd = (Radix.Words.encode word : ℤ) := by
+  induction word with
+  | nil => rfl
+  | cons letter tail previous =>
+      change ((letter.val + 1 : ℕ) : ℤ) + ((a + 1 : ℕ) : ℤ) *
+        (encode (dilation a) digit tail).toAdd = _
+      rw [previous]
+      simp [Radix.Words.encode]
+
+/-- The actual finite-root observation reads the head of the abstract group word. -/
+theorem readRoot_encoded {a : ℕ} (word : List (Fin a)) :
+    Radix.readRoot (a + 1)
+      ((2 * Real.pi) * ((encode (dilation a) digit word).toAdd : ℝ)) =
+      Radix.omega (a + 1) (Radix.Stack.headDigit word) := by
+  rw [encoded_word]
+  simpa [Radix.Stack.wordAngle] using Radix.Stack.readRoot_word word
+
+end Monodromy.SelfEmbedding.Integer
+
+namespace Monodromy.SelfEmbedding.Integer
+
+theorem head_encoded {a : ℕ} (word : List (Fin a)) :
+    head (dilation a) digit (encode (dilation a) digit word) = word.head? :=
+  head_encode (dilation a) digit (tags_injective a) word
+
+/-- Every finite analytic readout agrees with the derived quotient head on word memory. -/
+theorem choose_head_encoded {a : ℕ} (values : Fin (a + 1) → ℝ) (word : List (Fin a)) :
+    Radix.choose (a + 1) values (Radix.Stack.wordAngle word) =
+      values ((head (dilation a) digit (encode (dilation a) digit word)).elim 0 Fin.succ) := by
+  rw [head_encoded, Radix.Stack.choose_word]
+  cases word <;> rfl
+
+/-- The concrete analytic pop realizes the derived group inverse on all legal words. -/
+theorem pop_encoded {a : ℕ} (word : List (Fin a)) :
+    (2 * Real.pi) * ((pop (dilation a) (digit (a := a))
+      (encode (dilation a) digit word)).toAdd : ℝ) =
+      Radix.Stack.pop a (Radix.Stack.wordAngle word) := by
+  rw [pop_encode (dilation a) (digit (a := a)) (dilation_injective a) (tags_injective a),
+    encoded_word, Radix.Stack.pop_word]
+  simp [Radix.Stack.wordAngle]
+
+end Monodromy.SelfEmbedding.Integer
+
+namespace Monodromy.BinaryBlocks
+
+variable {a : ℕ}
+
+/-- The position of the unique one identifies the letter. -/
+def block (letter : Fin a) : List (Fin 2) :=
+  List.ofFn (fun position : Fin a => if position = letter then 1 else 0)
+
+@[simp] theorem block_length (letter : Fin a) : (block letter).length = a := by
+  simp [block]
+
+theorem block_injective : Function.Injective (@block a) := by
+  intro first second same
+  have entries := List.ofFn_injective same
+  have marked := congrFun entries first
+  by_contra different
+  simp [different] at marked
+
+/-- Nonzero ternary digits bound every finite binary word. -/
+theorem binary_encode_lt (word : List (Fin 2)) :
+    Radix.Words.encode word < 3 ^ word.length := by
+  induction word with
+  | nil => decide
+  | cons letter tail previous =>
+      have bound := letter.isLt
+      simp only [Radix.Words.encode, List.length_cons, pow_succ]
+      nlinarith
+
+def digit (letter : Fin a) : ℕ := Radix.Words.encode (block letter)
+
+theorem digit_positive (letter : Fin a) : 0 < digit letter := by
+  apply (Radix.Words.encode_pos_iff _).mpr
+  intro empty
+  have lengths := congrArg List.length empty
+  have bound := letter.isLt
+  simp only [block_length, List.length_nil] at lengths
+  omega
+
+theorem digit_lt (letter : Fin a) : digit letter < 3 ^ a := by
+  simpa only [digit, block_length] using binary_encode_lt (block letter)
+
+theorem digit_injective : Function.Injective (@digit a) :=
+  Radix.Words.encode_injective.comp block_injective
+
+def encode (word : List (Fin a)) : ℕ :=
+  Radix.Words.encode (word.flatMap block)
+
+@[simp] theorem encode_nil : encode ([] : List (Fin a)) = 0 := rfl
+
+/-- Each complete block is one digit at the corresponding cover-tower level. -/
+theorem encode_cons (letter : Fin a) (tail : List (Fin a)) :
+    encode (letter :: tail) = digit letter + 3 ^ a * encode tail := by
+  simp only [encode, List.flatMap_cons, Radix.Words.encode_append, block_length, digit]
+
+@[simp] theorem encode_cons_mod (letter : Fin a) (tail : List (Fin a)) :
+    encode (letter :: tail) % 3 ^ a = digit letter := by
+  rw [encode_cons, Nat.add_mul_mod_self_left, Nat.mod_eq_of_lt (digit_lt letter)]
+
+@[simp] theorem encode_cons_div (letter : Fin a) (tail : List (Fin a)) :
+    encode (letter :: tail) / 3 ^ a = encode tail := by
+  rw [encode_cons, Nat.add_mul_div_left _ _ (pow_pos (by decide) _),
+    Nat.div_eq_of_lt (digit_lt letter), Nat.zero_add]
+
+@[simp] theorem encode_eq_zero_iff (word : List (Fin a)) : encode word = 0 ↔ word = [] := by
+  cases word with
+  | nil => simp
+  | cons letter tail =>
+      have positive := digit_positive letter
+      simp only [encode_cons, reduceCtorEq, iff_false]
+      omega
+
+theorem encode_injective : Function.Injective (@encode a) := by
+  intro first
+  induction first with
+  | nil =>
+      intro second same
+      exact ((encode_eq_zero_iff second).mp same.symm).symm
+  | cons letter tail previous =>
+      intro second same
+      cases second with
+      | nil => cases ((encode_eq_zero_iff (letter :: tail)).mp same)
+      | cons other rest =>
+          have heads := congrArg (fun value => value % 3 ^ a) same
+          have tails := congrArg (fun value => value / 3 ^ a) same
+          simp only [encode_cons_mod] at heads
+          simp only [encode_cons_div] at tails
+          exact congrArg₂ List.cons (digit_injective heads) (previous tails)
+
+end Monodromy.BinaryBlocks

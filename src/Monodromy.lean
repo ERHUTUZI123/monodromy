@@ -3,6 +3,7 @@ module
 public import Monodromy.Lifting
 public import Monodromy.Finite
 public import Monodromy.Observation
+public import Monodromy.Feedback
 public import Monodromy.Logarithm
 public import Monodromy.Choice
 public import Monodromy.Autonomy
@@ -16,6 +17,23 @@ public import Monodromy.Tower
 public import Monodromy.TwoStacks
 public import Monodromy.Machine
 public import Monodromy.Universality
+public import Monodromy.Scaling
+public import Monodromy.Cosine
+public import Monodromy.Resolution
+public import Monodromy.CoverExpressions
+public import Monodromy.CoverTables
+public import Monodromy.CoverPrograms
+public import Monodromy.CoverCompiler
+public import Monodromy.CoverSyntax
+public import Monodromy.FiniteSupport
+public import Monodromy.FormalCompilation
+public import Monodromy.Effectiveness
+public import Monodromy.NativeLowerBound
+public import Monodromy.CanonicalIO
+public import Monodromy.BlockCoding
+public import Monodromy.NativeIO
+public import Monodromy.ForwardBoundary
+public import Monodromy.Structure
 
 /-!
 # Monodromy

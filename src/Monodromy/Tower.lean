@@ -54,3 +54,63 @@ theorem transport_observe (B : ℕ) [NeZero B] (curve : C(I, ℝ)) :
     (funext fun t => square B (curve t)) rfl
 
 end Monodromy.Radix.Tower
+
+namespace Monodromy.Radix.Tower
+
+def one : Punctured := ⟨1, one_ne_zero⟩
+
+abbrev Roots (B : ℕ) := Transport.Fiber (power B) one
+
+theorem root_power {B : ℕ} (root : Roots B) : root.val.val ^ B = 1 :=
+  congrArg Subtype.val root.property
+
+/-- Multiplication by a root of unity is a continuous symmetry of the power cover. -/
+def deck {B : ℕ} (root : Roots B) : C(Punctured, Punctured) where
+  toFun point := ⟨root.val.val * point.val, mul_ne_zero root.val.property point.property⟩
+  continuous_toFun := by fun_prop
+
+theorem deck_square {B : ℕ} (root : Roots B) : power B ∘ deck root = power B := by
+  funext point
+  apply Subtype.ext
+  change (root.val.val * point.val) ^ B = point.val ^ B
+  rw [mul_pow, root_power, one_mul]
+
+def deckAction {B : ℕ} (root : Roots B) : Roots B → Roots B :=
+  Transport.mapFiber (deck root) (deck_square root)
+
+theorem deckAction_commute {B : ℕ} (first second : Roots B) :
+    Function.Commute (deckAction first) (deckAction second) := by
+  intro state
+  apply Subtype.ext
+  apply Subtype.ext
+  change first.val.val * (second.val.val * state.val.val) =
+    second.val.val * (first.val.val * state.val.val)
+  ring
+
+/-- Root multiplication reaches every branch from every other branch. -/
+theorem deckAction_transitive (B : ℕ) (first second : Roots B) :
+    ∃ root : Roots B, deckAction root first = second := by
+  let ratio : Punctured := ⟨second.val.val / first.val.val,
+    div_ne_zero second.val.property first.val.property⟩
+  have ratio_root : power B ratio = one := by
+    apply Subtype.ext
+    change (second.val.val / first.val.val) ^ B = 1
+    rw [div_pow, root_power, root_power, div_self one_ne_zero]
+  refine ⟨⟨ratio, ratio_root⟩, ?_⟩
+  apply Subtype.ext
+  apply Subtype.ext
+  change (second.val.val / first.val.val) * first.val.val = second.val.val
+  exact div_mul_cancel₀ _ first.val.property
+
+/-- All fixed based-loop transports in a power cover commute. -/
+theorem loop_transport_commute (B : ℕ) [NeZero B] (first second : Path one one) :
+    Function.Commute (Transport.transport (covering B) first)
+      (Transport.transport (covering B) second) := by
+  apply Choice.commute_of_transitive_commuting (@deckAction B)
+    (deckAction_transitive B) deckAction_commute
+  · intro root
+    exact (Transport.loop_selfmap_commute (covering B) (deck root) (deck_square root) first).symm
+  · intro root
+    exact (Transport.loop_selfmap_commute (covering B) (deck root) (deck_square root) second).symm
+
+end Monodromy.Radix.Tower
