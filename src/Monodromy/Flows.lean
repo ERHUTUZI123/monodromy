@@ -116,6 +116,81 @@ theorem write_two_pi_parameter (state : TorusCover.State) :
     write (2 * Real.pi) state.1 = (parameterAction state).1 :=
   (write_two_pi state).trans (parameter_apply state).symm
 
+/-- A chosen smooth gate: the second inner phase controls whether the first moves. -/
+noncomputable def gated (t : ℝ) (x : Circle × Circle) : Circle × Circle :=
+  (x.1 * Circle.exp (t * (1 + (x.2 : ℂ).re) / 4), x.2)
+
+theorem continuous_gated : Continuous (fun p : ℝ × (Circle × Circle) => gated p.1 p.2) := by
+  unfold gated
+  fun_prop
+
+theorem gated_zero (x : Circle × Circle) : gated 0 x = x := by
+  simp [gated]
+
+theorem gated_add (s t : ℝ) (x : Circle × Circle) :
+    gated (s + t) x = gated s (gated t x) := by
+  apply Prod.ext
+  · change x.1 * Circle.exp ((s+t) * (1 + (x.2 : ℂ).re) / 4) =
+      (x.1 * Circle.exp (t * (1 + (x.2 : ℂ).re) / 4)) *
+        Circle.exp (s * (1 + (x.2 : ℂ).re) / 4)
+    rw [add_mul, add_div, Circle.exp_add]
+    ac_rfl
+  · rfl
+
+theorem gated_two_pi_positive (a b : Circle) (positive : b = 1) :
+    gated (2 * Real.pi) (a, b) = (-a, b) := by
+  subst b
+  unfold gated
+  simp only [Circle.coe_one, Complex.one_re]
+  rw [show 2 * Real.pi * (1 + 1) / 4 = Real.pi by ring, exp_pi]
+  simp
+
+theorem gated_two_pi_negative (a b : Circle) (negative : b = -1) :
+    gated (2 * Real.pi) (a, b) = (a, b) := by
+  subst b
+  simp [gated]
+
+/-- This action is calculated from the continuous gate on every actual fiber point. -/
+theorem gated_two_pi_bits (a b : Bool) :
+    gated (2 * Real.pi) (TorusCover.stateOfBits (a, b)).1 =
+      (TorusCover.stateOfBits ((if b then a else !a), b)).1 := by
+  cases b
+  · change gated (2 * Real.pi) (TorusCover.sign a, 1) = (TorusCover.sign (!a), 1)
+    rw [gated_two_pi_positive _ _ rfl]
+    cases a <;> simp [TorusCover.sign]
+  · change gated (2 * Real.pi) (TorusCover.sign a, -1) = (TorusCover.sign a, -1)
+    exact gated_two_pi_negative _ _ rfl
+
+theorem gated_two_pi_preserves_fiber (state : TorusCover.State) :
+    TorusCover.projection (gated (2 * Real.pi) state.1) = TorusCover.base := by
+  obtain ⟨⟨a, b⟩, rfl⟩ := TorusCover.fiberEquivBits.symm.surjective state
+  change TorusCover.projection (gated (2 * Real.pi) (TorusCover.stateOfBits (a,b)).1) = _
+  rw [gated_two_pi_bits]
+  exact (TorusCover.stateOfBits ((if b then a else !a), b)).2
+
+/-- A symmetric chosen gate lets the first phase control writing the second. -/
+noncomputable def gatedWrite (t : ℝ) (x : Circle × Circle) : Circle × Circle :=
+  (gated t x.swap).swap
+
+theorem continuous_gatedWrite :
+    Continuous (fun p : ℝ × (Circle × Circle) => gatedWrite p.1 p.2) :=
+  continuous_swap.comp (continuous_gated.comp
+    (continuous_fst.prodMk (continuous_swap.comp continuous_snd)))
+
+theorem gatedWrite_zero (x : Circle × Circle) : gatedWrite 0 x = x := by
+  simp [gatedWrite, gated_zero]
+
+theorem gatedWrite_add (s t : ℝ) (x : Circle × Circle) :
+    gatedWrite (s+t) x = gatedWrite s (gatedWrite t x) := by
+  simp [gatedWrite, gated_add]
+
+theorem gatedWrite_two_pi_bits (a b : Bool) :
+    gatedWrite (2 * Real.pi) (TorusCover.stateOfBits (a,b)).1 =
+      (TorusCover.stateOfBits (a, if a then b else !b)).1 := by
+  change (gated (2 * Real.pi) (TorusCover.stateOfBits (b,a)).1).swap = _
+  rw [gated_two_pi_bits]
+  rfl
+
 end Monodromy.Torus
 
 namespace Monodromy.Quartic
@@ -316,5 +391,186 @@ theorem write_hasDerivAt (state : Space) (t : ℝ) :
   lift_hasDerivAt (fun s => write s state)
     (write.continuous continuous_id continuous_const).continuousAt
     (write_control_hasDerivAt state t) (write_parameter_hasDerivAt state t)
+
+noncomputable def gated : Flow ℝ Space where
+  toFun t state := homeomorph (Torus.gated t (homeomorph.symm state))
+  cont' := homeomorph.continuous.comp (Torus.continuous_gated.comp
+    (continuous_fst.prodMk (homeomorph.symm.continuous.comp continuous_snd)))
+  map_add' s t state := by simp [Torus.gated_add]
+  map_zero' state := by simp [Torus.gated_zero]
+
+noncomputable def gatedWrite : Flow ℝ Space where
+  toFun t state := homeomorph (Torus.gatedWrite t (homeomorph.symm state))
+  cont' := homeomorph.continuous.comp (Torus.continuous_gatedWrite.comp
+    (continuous_fst.prodMk (homeomorph.symm.continuous.comp continuous_snd)))
+  map_add' s t state := by simp [Torus.gatedWrite_add]
+  map_zero' state := by simp [Torus.gatedWrite_zero]
+
+private theorem gated_realize (t : ℝ) (x : Circle × Circle) :
+    gated t (homeomorph x) = homeomorph (Torus.gated t x) := by simp [gated]
+
+private theorem gatedWrite_realize (t : ℝ) (x : Circle × Circle) :
+    gatedWrite t (homeomorph x) = homeomorph (Torus.gatedWrite t x) := by simp [gatedWrite]
+
+theorem gated_closes (state : Memory) :
+    projection (gated (2 * Real.pi) state.1) = TorusCover.base := by
+  obtain ⟨e, rfl⟩ := coordinates.surjective state
+  change projection (gated (2 * Real.pi) (homeomorph e.1)) = TorusCover.base
+  rw [gated_realize]
+  exact Torus.gated_two_pi_preserves_fiber e
+
+theorem gatedWrite_closes (state : Memory) :
+    projection (gatedWrite (2 * Real.pi) state.1) = TorusCover.base := by
+  obtain ⟨e, rfl⟩ := coordinates.surjective state
+  obtain ⟨⟨a,b⟩, rfl⟩ := TorusCover.fiberEquivBits.symm.surjective e
+  change projection (gatedWrite (2 * Real.pi)
+    (homeomorph (TorusCover.stateOfBits (a,b)).1)) = TorusCover.base
+  rw [gatedWrite_realize, Torus.gatedWrite_two_pi_bits]
+  exact (TorusCover.stateOfBits (a, if a then b else !b)).2
+
+/-- The actual returning flow endpoint, with reversibility inherited from the flow. -/
+noncomputable def gateControl : Equiv.Perm Memory := by
+  let endpoint : Memory → Memory := fun state =>
+    ⟨gated (2 * Real.pi) state.1, gated_closes state⟩
+  have injective : Function.Injective endpoint := by
+    intro state other same
+    apply Subtype.ext
+    exact (gated.toHomeomorph (2 * Real.pi)).injective (congrArg Subtype.val same)
+  exact Equiv.ofBijective endpoint ⟨injective, Finite.surjective_of_injective injective⟩
+
+noncomputable def gateWrite : Equiv.Perm Memory := by
+  let endpoint : Memory → Memory := fun state =>
+    ⟨gatedWrite (2 * Real.pi) state.1, gatedWrite_closes state⟩
+  have injective : Function.Injective endpoint := by
+    intro state other same
+    apply Subtype.ext
+    exact (gatedWrite.toHomeomorph (2 * Real.pi)).injective (congrArg Subtype.val same)
+  exact Equiv.ofBijective endpoint ⟨injective, Finite.surjective_of_injective injective⟩
+
+/-- Labels describe the complete physical memory fiber. -/
+noncomputable def bits : Memory ≃ Logic.Bits :=
+  coordinates.symm.trans TorusCover.fiberEquivBits
+
+private theorem gateControl_encoded (a b : Bool) :
+    gateControl (bits.symm (a,b)) = bits.symm (Logic.control (a,b)) := by
+  apply Subtype.ext
+  change gated (2 * Real.pi) (homeomorph (TorusCover.stateOfBits (a,b)).1) =
+    homeomorph (TorusCover.stateOfBits (Logic.control (a,b))).1
+  rw [gated_realize, Torus.gated_two_pi_bits, Logic.control_apply]
+
+private theorem gateWrite_encoded (a b : Bool) :
+    gateWrite (bits.symm (a,b)) = bits.symm (Logic.write (a,b)) := by
+  apply Subtype.ext
+  change gatedWrite (2 * Real.pi) (homeomorph (TorusCover.stateOfBits (a,b)).1) =
+    homeomorph (TorusCover.stateOfBits (Logic.write (a,b))).1
+  rw [gatedWrite_realize, Torus.gatedWrite_two_pi_bits, Logic.write_apply]
+
+theorem bits_gateControl (state : Memory) :
+    bits (gateControl state) = Logic.control (bits state) := by
+  obtain ⟨⟨a,b⟩, rfl⟩ := bits.symm.surjective state
+  simpa only [Equiv.apply_symm_apply] using congrArg bits (gateControl_encoded a b)
+
+theorem bits_gateWrite (state : Memory) :
+    bits (gateWrite state) = Logic.write (bits state) := by
+  obtain ⟨⟨a,b⟩, rfl⟩ := bits.symm.surjective state
+  simpa only [Equiv.apply_symm_apply] using congrArg bits (gateWrite_encoded a b)
+
+private theorem control_encoded (a b : Bool) :
+    control (bits.symm (a,b)) = bits.symm (Logic.old (a,b)) := by
+  change control (coordinates (TorusCover.stateOfBits (a,b))) =
+    coordinates (TorusCover.stateOfBits (Logic.old (a,b)))
+  rw [← coordinates_control, Logic.old_apply]
+  apply congrArg coordinates
+  apply Subtype.ext
+  rw [Torus.control_apply]
+  cases a <;> simp [TorusCover.stateOfBits, TorusCover.sign]
+
+theorem bits_control (state : Memory) : bits (control state) = Logic.old (bits state) := by
+  obtain ⟨⟨a,b⟩, rfl⟩ := bits.symm.surjective state
+  simpa only [Equiv.apply_symm_apply] using congrArg bits (control_encoded a b)
+
+/-- The same continuous phase weight selects the control motion. -/
+noncomputable def gateDrive (state : Space) : ℂ :=
+  Complex.I * (2 * (state.1.1.1 : ℂ)) * (weight (inner state) : ℂ)
+
+/-- Exchange the roles of the phases to select memory writing. -/
+noncomputable def gateWriteDrive (state : Space) : ℂ :=
+  Complex.I * (state.1.1.2 : ℂ) * (weight (outer state) : ℂ)
+
+private theorem gateDrive_realize (x : Circle × Circle) :
+    gateDrive (homeomorph x) = Complex.I * (2 * (x.1 : ℂ)^2) * (weight x.2 : ℂ) := by
+  change Complex.I * (2 * (x.1 : ℂ)^2) * (weight (inner (homeomorph x)) : ℂ) = _
+  rw [inner_realize]
+
+private theorem gateWriteDrive_realize (x : Circle × Circle) :
+    gateWriteDrive (homeomorph x) = Complex.I * (x.2 : ℂ)^2 * (weight x.1 : ℂ) := by
+  change Complex.I * (x.2 : ℂ)^2 * (weight (outer (homeomorph x)) : ℂ) = _
+  rw [outer_realize]
+
+theorem gated_control_hasDerivAt (state : Space) (t : ℝ) :
+    HasDerivAt (fun s => 2 * ((gated s state).1.1.1 : ℂ)) (gateDrive (gated t state)) t := by
+  obtain ⟨⟨a, b⟩, rfl⟩ := homeomorph.surjective state
+  simp only [gated_realize, gateDrive_realize]
+  change HasDerivAt
+    (fun s : ℝ => 2 * ((a * Circle.exp (s * (1 + (b : ℂ).re) / 4) : Circle) : ℂ)^2)
+    (Complex.I * (2 * ((a * Circle.exp (t * (1 + (b : ℂ).re) / 4) : Circle) : ℂ)^2) *
+      (weight b : ℂ)) t
+  have scale (s : ℝ) : s * (1 + (b : ℂ).re) / 4 = s * weight b / 2 := by
+    dsimp [weight]
+    ring
+  simpa only [scale] using Torus.rotation_hasDerivAt 2 a (weight b) t
+
+private theorem gated_parameter_hasDerivAt (state : Space) (t : ℝ) :
+    HasDerivAt (fun s => ((gated s state).1.1.2 : ℂ)) 0 t := by
+  obtain ⟨⟨a, b⟩, rfl⟩ := homeomorph.surjective state
+  simp only [gated_realize]
+  exact hasDerivAt_const t ((b ^ 2 : Circle) : ℂ)
+
+theorem gated_hasDerivAt (state : Space) (t : ℝ) :
+    HasDerivAt (fun s => (gated s state).1.2)
+      (velocity (2 * ((gated t state).1.1.1 : ℂ)) (gated t state).1.2
+        (gateDrive (gated t state)) 0) t :=
+  lift_hasDerivAt (fun s => gated s state)
+    (gated.continuous continuous_id continuous_const).continuousAt
+    (gated_control_hasDerivAt state t) (gated_parameter_hasDerivAt state t)
+
+private theorem gatedWrite_control_hasDerivAt (state : Space) (t : ℝ) :
+    HasDerivAt (fun s => 2 * ((gatedWrite s state).1.1.1 : ℂ)) 0 t := by
+  obtain ⟨⟨a, b⟩, rfl⟩ := homeomorph.surjective state
+  simp only [gatedWrite_realize]
+  exact hasDerivAt_const t (2 * ((a ^ 2 : Circle) : ℂ))
+
+theorem gatedWrite_parameter_hasDerivAt (state : Space) (t : ℝ) :
+    HasDerivAt (fun s => ((gatedWrite s state).1.1.2 : ℂ))
+      (gateWriteDrive (gatedWrite t state)) t := by
+  obtain ⟨⟨a, b⟩, rfl⟩ := homeomorph.surjective state
+  simp only [gatedWrite_realize, gateWriteDrive_realize]
+  change HasDerivAt
+    (fun s : ℝ => ((b * Circle.exp (s * (1 + (a : ℂ).re) / 4) : Circle) : ℂ)^2)
+    (Complex.I * ((b * Circle.exp (t * (1 + (a : ℂ).re) / 4) : Circle) : ℂ)^2 *
+      (weight a : ℂ)) t
+  have scale (s : ℝ) : s * (1 + (a : ℂ).re) / 4 = s * weight a / 2 := by
+    dsimp [weight]
+    ring
+  simpa only [one_mul, scale] using Torus.rotation_hasDerivAt 1 b (weight a) t
+
+theorem gatedWrite_hasDerivAt (state : Space) (t : ℝ) :
+    HasDerivAt (fun s => (gatedWrite s state).1.2)
+      (velocity (2 * ((gatedWrite t state).1.1.1 : ℂ)) (gatedWrite t state).1.2
+        0 (gateWriteDrive (gatedWrite t state))) t :=
+  lift_hasDerivAt (fun s => gatedWrite s state)
+    (gatedWrite.continuous continuous_id continuous_const).continuousAt
+    (gatedWrite_control_hasDerivAt state t) (gatedWrite_parameter_hasDerivAt state t)
+
+/-- These are closed feedback operations on the same physical memory fiber. -/
+theorem gates_noncommute : gateControl * gateWrite ≠ gateWrite * gateControl :=
+  Logic.noncommutation_of_correspondence bits gateControl gateWrite
+    bits_gateControl bits_gateWrite
+
+/-- The two conditional gates and the old flip generate every four-root permutation. -/
+theorem gates_generate_all :
+    Subgroup.closure ({gateControl, gateWrite, control} : Set (Equiv.Perm Memory)) = ⊤ :=
+  Logic.generates_all_of_correspondence bits gateControl gateWrite control
+    bits_gateControl bits_gateWrite bits_control
 
 end Monodromy.Quartic

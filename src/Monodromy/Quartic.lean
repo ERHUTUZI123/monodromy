@@ -381,4 +381,32 @@ theorem weight_complement (phase : ℂ) : weight (-phase) = 1 - weight phase := 
 @[simp] theorem weight_one : weight 1 = 1 := by norm_num [weight]
 @[simp] theorem weight_neg_one : weight (-1) = 0 := by norm_num [weight]
 
+open scoped ComplexOrder
+
+private lemma sqrt_real {r : ℝ} (h : 0 ≤ r) :
+    Complex.sqrt (r : ℂ) = (Real.sqrt r : ℂ) := by
+  exact Complex.sqrt_of_nonneg (Complex.zero_le_real.mpr h)
+
+theorem root_one_one : root 1 1 = (Real.sqrt 3 : ℂ) := by
+  have two : Complex.sqrt (2 : ℂ) = (Real.sqrt 2 : ℂ) := sqrt_real (by norm_num)
+  have three_halves : Complex.sqrt (3 / 2 : ℂ) = (Real.sqrt (3 / 2) : ℂ) := by
+    simpa only [Complex.ofReal_div, Complex.ofReal_ofNat, Complex.ofReal_one] using sqrt_real (r := (3 / 2 : ℝ)) (by norm_num)
+  norm_num only [root, Circle.coe_one, one_pow, mul_one, one_div] at *
+  rw [two, three_halves, ← Complex.ofReal_mul, ← Real.sqrt_mul (by norm_num : (0 : ℝ) ≤ 2)]
+  norm_num
+
+theorem root_one_neg_one : root 1 (-1) = 1 := by
+  have two : Complex.sqrt (2 : ℂ) = (Real.sqrt 2 : ℂ) := sqrt_real (by norm_num)
+  have half : Complex.sqrt (1 / 2 : ℂ) = (Real.sqrt (1 / 2) : ℂ) := by
+    simpa only [Complex.ofReal_div, Complex.ofReal_ofNat, Complex.ofReal_one] using sqrt_real (r := (1 / 2 : ℝ)) (by norm_num)
+  norm_num only [root, Circle.coe_one, Circle.coe_neg, one_pow, mul_one, neg_div] at *
+  rw [two, half, ← Complex.ofReal_mul, ← Real.sqrt_mul (by norm_num : (0 : ℝ) ≤ 2)]
+  norm_num
+
+theorem root_neg_one_one : root (-1) 1 = -(Real.sqrt 3 : ℂ) := by
+  rw [root_neg_control, root_one_one]
+
+theorem root_neg_one_neg_one : root (-1) (-1) = -1 := by
+  rw [root_neg_control, root_one_neg_one]
+
 end Monodromy.Quartic

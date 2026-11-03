@@ -340,4 +340,50 @@ theorem generates_all : Subgroup.closure ({control, write, old} : Set (Equiv.Per
   rw [generator] at inside
   exact top_unique inside
 
+universe u
+
+private theorem conjugate_of_action {α : Type u} (e : α ≃ Bits)
+    (f : Equiv.Perm α) (g : Equiv.Perm Bits)
+    (corresponds : ∀ x, e (f x) = g (e x)) : e.permCongrHom f = g := by
+  apply Equiv.ext
+  intro x
+  change e (f (e.symm x)) = g x
+  simpa only [Equiv.apply_symm_apply] using corresponds (e.symm x)
+
+theorem generates_all_of_correspondence {α : Type u} (e : α ≃ Bits)
+    (fC fW fA : Equiv.Perm α)
+    (hC : ∀ x, e (fC x) = control (e x))
+    (hW : ∀ x, e (fW x) = write (e x))
+    (hA : ∀ x, e (fA x) = old (e x)) :
+    Subgroup.closure ({fC, fW, fA} : Set (Equiv.Perm α)) = ⊤ := by
+  have hc := conjugate_of_action e fC control hC
+  have hw := conjugate_of_action e fW write hW
+  have ha := conjugate_of_action e fA old hA
+  let H := Subgroup.closure ({fC, fW, fA} : Set (Equiv.Perm α))
+  have mapped : H.map e.permCongrHom.toMonoidHom = ⊤ := by
+    change (Subgroup.closure ({fC, fW, fA} : Set (Equiv.Perm α))).map
+      e.permCongrHom.toMonoidHom = ⊤
+    rw [MonoidHom.map_closure]
+    simp only [Set.image_insert_eq, Set.image_singleton]
+    change Subgroup.closure ({e.permCongrHom fC, e.permCongrHom fW,
+      e.permCongrHom fA} : Set (Equiv.Perm Bits)) = ⊤
+    rw [hc, hw, ha]
+    exact generates_all
+  apply top_unique
+  intro permutation _
+  apply (Subgroup.mem_map_iff_mem (f := e.permCongrHom.toMonoidHom)
+    e.permCongrHom.injective).mp
+  rw [mapped]
+  trivial
+
+theorem noncommutation_of_correspondence {α : Type u} (e : α ≃ Bits)
+    (fC fW : Equiv.Perm α)
+    (hC : ∀ x, e (fC x) = control (e x))
+    (hW : ∀ x, e (fW x) = write (e x)) : fC * fW ≠ fW * fC := by
+  have hc := conjugate_of_action e fC control hC
+  have hw := conjugate_of_action e fW write hW
+  intro same
+  apply closed_noncommutation
+  simpa only [map_mul, hc, hw] using congrArg e.permCongrHom same
+
 end Monodromy.Logic

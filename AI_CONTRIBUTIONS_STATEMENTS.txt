@@ -1,0 +1,5 @@
+Generative AI (OpenAI ChatGPT and Codex, including collaborating AI agents) contributed substantially to the conception and mathematical development of this work, including research ideation, theoretical constructions, conjectures, proofs, Lean formalization, implementation, and manuscript preparation.
+
+The human author directed the research, determined its scope and principles, established its aesthetic aims and the use of Lean as the native research environment, critically evaluated the results, and assumes full responsibility for the work.
+
+The formalization and source code accompany this manuscript for independent verification.

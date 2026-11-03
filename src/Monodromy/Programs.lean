@@ -1,0 +1,177 @@
+module
+
+public import Monodromy.Flows
+public import Monodromy.Execution
+meta import Monodromy.Execution
+
+/-!
+# Programs through four roots
+
+Instructions are returning feedback motions. Their exact symbolic execution
+is identified with the same root computation and its lifted path.
+-/
+
+@[expose] public section
+
+namespace Monodromy.Program
+
+private theorem run_eq_growth (program : List Instruction) (state : Logic.Bits) :
+    run program state = Growth.run operation program state := by
+  induction program generalizing state with
+  | nil => rfl
+  | cons instruction rest ih => exact ih (operation instruction state)
+
+private theorem operation_twice (instruction : Instruction) (state : Logic.Bits) :
+    operation instruction (operation instruction state) = state := by
+  cases instruction <;> rcases state with ⟨a, b⟩ <;> cases a <;> cases b <;> decide
+
+theorem run_append (first second : List Instruction) (state : Logic.Bits) :
+    run (first ++ second) state = run second (run first state) := by
+  induction first generalizing state with
+  | nil => rfl
+  | cons instruction rest ih => exact ih (operation instruction state)
+
+theorem run_reverse (program : List Instruction) (state : Logic.Bits) :
+    run program.reverse (run program state) = state := by
+  induction program generalizing state with
+  | nil => rfl
+  | cons instruction rest ih =>
+      rw [List.reverse_cons, run_append]
+      change operation instruction (run rest.reverse (run rest (operation instruction state))) = state
+      rw [ih, operation_twice]
+
+def exchange : List Instruction := [.control, .write, .control]
+
+/-- A complete three-step program exchanges the two branches. -/
+theorem run_exchange : ∀ state : Logic.Bits, run exchange state = state.swap := by decide
+
+noncomputable def geometry : Instruction → Equiv.Perm Quartic.Memory
+  | .flip => Quartic.control
+  | .control => Quartic.gateControl
+  | .write => Quartic.gateWrite
+
+noncomputable def runGeometry (program : List Instruction) (state : Quartic.Memory) :
+    Quartic.Memory :=
+  Growth.run (fun instruction => geometry instruction) program state
+
+private theorem bits_geometry (instruction : Instruction) (state : Quartic.Memory) :
+    Quartic.bits (geometry instruction state) = operation instruction (Quartic.bits state) := by
+  cases instruction with
+  | flip =>
+      change Quartic.bits (Quartic.control state) = operation .flip (Quartic.bits state)
+      rw [Quartic.bits_control]
+      exact Logic.old_apply (Quartic.bits state).1 (Quartic.bits state).2
+  | control =>
+      change Quartic.bits (Quartic.gateControl state) = operation .control (Quartic.bits state)
+      rw [Quartic.bits_gateControl]
+      exact Logic.control_apply (Quartic.bits state).1 (Quartic.bits state).2
+  | write =>
+      change Quartic.bits (Quartic.gateWrite state) = operation .write (Quartic.bits state)
+      rw [Quartic.bits_gateWrite]
+      exact Logic.write_apply (Quartic.bits state).1 (Quartic.bits state).2
+
+/-- Symbolic execution is the exact readout of every geometric program. -/
+theorem bits_runGeometry (program : List Instruction) (state : Quartic.Memory) :
+    Quartic.bits (runGeometry program state) = run program (Quartic.bits state) := by
+  rw [run_eq_growth]
+  exact (Growth.run_intertwines
+    (embed := Quartic.bits)
+    (oldStep := fun instruction => geometry instruction)
+    (newStep := operation)
+    (fun instruction state => (bits_geometry instruction state).symm)
+    program state).symm
+
+/-- The same three motions exchange the two branch labels of the carried root. -/
+theorem runGeometry_exchange (state : Quartic.Memory) :
+    runGeometry exchange state = Quartic.bits.symm ((Quartic.bits state).swap) := by
+  apply Quartic.bits.injective
+  rw [bits_runGeometry, run_exchange, Equiv.apply_symm_apply]
+
+/-- Reversing a program restores the physical memory state. -/
+theorem runGeometry_reverse (program : List Instruction) (state : Quartic.Memory) :
+    runGeometry program.reverse (runGeometry program state) = state := by
+  apply Quartic.bits.injective
+  rw [bits_runGeometry, bits_runGeometry, run_reverse]
+
+/-- Each instruction is a complete continuous motion of the same root space. -/
+noncomputable def motion : Instruction → Flow ℝ Quartic.Space
+  | .flip => Quartic.flow
+  | .control => Quartic.gated
+  | .write => Quartic.gatedWrite
+
+theorem motion_endpoint (instruction : Instruction) (state : Quartic.Memory) :
+    motion instruction (2 * Real.pi) state.1 = (geometry instruction state).1 := by
+  cases instruction with
+  | flip => exact Quartic.flow_two_pi state
+  | control => rfl
+  | write => rfl
+
+/-- The actual carried root throughout one instruction. -/
+noncomputable def trajectory (instruction : Instruction) (state : Quartic.Memory) :
+    C(unitInterval, Quartic.Space) where
+  toFun t := motion instruction (2 * Real.pi * (t : ℝ)) state.1
+  continuous_toFun := (motion instruction).continuous
+    (continuous_const.mul continuous_subtype_val) continuous_const
+
+/-- The control path generated by an instruction and the current root. -/
+noncomputable def operationPath (instruction : Instruction) (state : Quartic.Memory) :
+    Path TorusCover.base TorusCover.base where
+  toFun t := Quartic.projection (trajectory instruction state t)
+  continuous_toFun := Quartic.isCoveringMap_projection.continuous.comp
+    (trajectory instruction state).continuous
+  source' := by
+    change Quartic.projection (motion instruction (2 * Real.pi * 0) state.1) = _
+    rw [mul_zero, Flow.map_zero_apply]
+    exact state.2
+  target' := by
+    change Quartic.projection (motion instruction (2 * Real.pi * 1) state.1) = _
+    rw [mul_one, motion_endpoint]
+    exact (geometry instruction state).2
+
+theorem operation_transport (instruction : Instruction) (state : Quartic.Memory) :
+    Transport.transport Quartic.isCoveringMap_projection (operationPath instruction state) state =
+      geometry instruction state := by
+  apply Subtype.ext
+  calc
+    (Transport.transport Quartic.isCoveringMap_projection
+        (operationPath instruction state) state : Quartic.Space) = trajectory instruction state 1 :=
+      Transport.transport_eq_actual_lift Quartic.isCoveringMap_projection
+        (operationPath instruction state) state (trajectory instruction state) rfl
+        (by simp [trajectory])
+    _ = (geometry instruction state).1 := by
+      change motion instruction (2 * Real.pi * 1) state.1 = _
+      rw [mul_one, motion_endpoint]
+
+/-- A whole program generates one path, carrying forward its actual intermediate state. -/
+noncomputable def path : List Instruction → Quartic.Memory → Path TorusCover.base TorusCover.base
+  | [], _ => Path.refl TorusCover.base
+  | instruction :: rest, state =>
+      (operationPath instruction state).trans (path rest (geometry instruction state))
+
+theorem path_correct (program : List Instruction) (state : Quartic.Memory) :
+    Transport.transport Quartic.isCoveringMap_projection (path program state) state =
+      runGeometry program state := by
+  induction program generalizing state with
+  | nil => exact Transport.transport_refl Quartic.isCoveringMap_projection state
+  | cons instruction rest ih =>
+      change Transport.transport Quartic.isCoveringMap_projection
+        ((operationPath instruction state).trans (path rest (geometry instruction state))) state = _
+      rw [Transport.transport_trans, operation_transport, ih]
+      rfl
+
+/-- One complete computation: the root 1 follows the exchange program to -√3. -/
+theorem exchange_from_one :
+    Quartic.value (Quartic.bits.symm (false, true)) = 1 ∧
+    Quartic.value (Transport.transport Quartic.isCoveringMap_projection
+      (path exchange (Quartic.bits.symm (false, true)))
+      (Quartic.bits.symm (false, true))) = -(Real.sqrt 3 : ℂ) := by
+  constructor
+  · change Quartic.root 1 (-1) = 1
+    exact Quartic.root_one_neg_one
+  · rw [path_correct, runGeometry_exchange, Equiv.apply_symm_apply]
+    change Quartic.root (-1) 1 = -(Real.sqrt 3 : ℂ)
+    exact Quartic.root_neg_one_one
+
+#eval run exchange (false, true)
+
+end Monodromy.Program

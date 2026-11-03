@@ -1,14 +1,38 @@
 module
 
-public import Monodromy.Flows
+public import Monodromy.Lifting
+public import Monodromy.Finite
+public import Monodromy.Observation
+public import Monodromy.Logarithm
+public import Monodromy.Choice
+public import Monodromy.Autonomy
+public import Monodromy.Cubic
+public import Monodromy.Counter
+public import Monodromy.ProgramCounter
+public import Monodromy.Lattice
+public import Monodromy.Control
+public import Monodromy.Radix
+public import Monodromy.Tower
+public import Monodromy.TwoStacks
+public import Monodromy.Machine
+public import Monodromy.Universality
 
 /-!
 # Monodromy
 
-`(z²-u)²=θ`, over `|u|=2, |θ|=1`.
+A root is memory; continuation carries it through a computation.
 
-A root is memory. A path computes by carrying that root.
-Control and parameter paths follow the same lifting rule.
-On regular differentiable traces, its differential law agrees with transport.
-The inner root steers an autonomous flow.
+The quartic is a fixed finite example. Finite persistent state has precise
+computational bounds; logarithmic branches provide integer memory.
+A marked regular root gives an analytic fiber selector. Internal feedback
+uses it to generate paths, write state, and change subsequent selection.
+Every finite run of the return system agrees with actual path transport.
+
+An exponential power-cover tower gives ordered word memory. Two word branches
+and a finite analytic controller simulate every finite TM0 table, preserving
+the complete tape, halting, and divergence. Native finite runs are realized
+by their own generated continuation paths.
+
+The cubic supplies a second mechanism: one fixed loop acts selectively on
+different roots, as proved from its explicit continuous lifts.
 -/
