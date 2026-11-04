@@ -4679,6 +4679,21 @@ theorem step_defined_injective (program : Program n m) {first second last : Stat
       _ = second.1 := restore_step program right_step
   · exact histories
 
+theorem history_lt (program : Program n m) {first last : State n m}
+    (transition : step program first = some last) : first.2 < last.2 := by
+  obtain ⟨next, _, result⟩ := Option.map_eq_some_iff.mp transition
+  rw [← result]
+  change first.2 < push (tag program first.1) first.2
+  rw [push, Nat.add_mul, Nat.one_mul]
+  omega
+
+/-- Every positive finite source run leaves a strictly longer recoverable history. -/
+theorem history_lt_of_reaches (program : Program n m) {first last : State n m}
+    (run : StateTransition.Reaches₁ (step program) first last) : first.2 < last.2 := by
+  induction run with
+  | single transition => exact history_lt program transition
+  | tail _ transition previous => exact previous.trans (history_lt program transition)
+
 /-- Recording a tag preserves source results, termination, and divergence after projection. -/
 theorem eval_projection (program : Program n m) (state : State n m) :
     Counter.eval program state.1 =
