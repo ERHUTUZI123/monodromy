@@ -1,6 +1,12 @@
-./Prometheus-Monodromy-Archive.zip
-./AGENTS.md
+/Prometheus-Monodromy-Archive.zip
+/AGENTS.md
 .lake/
 
-/Prometheus-Monodromy-Archive.zip
-**/.lake/
+# LaTeX intermediates; PDFs, bibliography sources and release files remain visible.
+*.aux
+*.log
+*.out
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.blg

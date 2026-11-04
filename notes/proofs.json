@@ -1,0 +1,52 @@
+{
+  "2_covering_transport.lean": {
+    "source": "src/Monodromy/Covering.lean",
+    "sha256": "aefdaceefa095ff0e469f6766ca5bf2502b71b887c244e8f6be18ed5d8448b0c",
+    "manuscript": "Section 2; covering transport and pullbacks"
+  },
+  "2_construction_conditional_winding.lean": {
+    "source": "src/Monodromy/Logarithm.lean",
+    "sha256": "7c717767a34b9975b34b033cf81fed276c1e642f6bb7abceab23baba8a3ee1d1",
+    "manuscript": "Section 2; the two logarithmic lifts"
+  },
+  "3.1_definition_successive_execution.lean": {
+    "source": "src/Monodromy/Continuation.lean",
+    "sha256": "23de07f7988b2e7e793e21969c393285953f7b42859ce1e83ade7f6379915806",
+    "manuscript": "Definition 3.1, Proposition 3.2, Example 3.3, Definition 4.1; actual execution, native gates, routing"
+  },
+  "4_analytic_branch_selection.lean": {
+    "source": "src/Monodromy/Choice.lean",
+    "sha256": "8a1a9f2a8ef9368bf53e96d2efef8d2dd1fdc3cf5902d543a2564263e0522aec",
+    "manuscript": "Section 4; analytic kernels used in Definition 4.1"
+  },
+  "4_finite_root_observation.lean": {
+    "source": "src/Monodromy/Radix.lean",
+    "sha256": "3df520199900e7d5f25e44df8e957416b6b1905f0e04e22eff86df976e586945",
+    "manuscript": "Section 4; finite power-cover observation"
+  },
+  "4.2_proposition_counter_realization.lean": {
+    "source": "src/Monodromy/Counter.lean",
+    "sha256": "18071b1542f5537d9d60a38364402716374278f2973e5e0a6a1bcb2537c3a4da",
+    "manuscript": "Proposition 4.2; counter compilation used in Theorem 5.1"
+  },
+  "5_tape_encoding.lean": {
+    "source": "src/Monodromy/Tape.lean",
+    "sha256": "ee9366877d75bc36c5966b59e0a1a8ff3f3a2cf73080263e1b8973b3ee0d8a61",
+    "manuscript": "Theorem 5.1; canonical half-tape coding"
+  },
+  "5_finite_source_renaming.lean": {
+    "source": "src/Monodromy/FiniteSupport.lean",
+    "sha256": "6d28dd06edb9344502e68ac755d6e69d4408816d1a34f40d446a05e13c8674d4",
+    "manuscript": "Theorem 5.1; finite pointed source types"
+  },
+  "5.1_theorem_native_geometric_turing_universality.lean": {
+    "source": "src/Monodromy/FormalCompilation.lean",
+    "sha256": "d5fd04204eeaaed2d46040f106e084da67fa9ebdccf0758117c5702c1f1341d0",
+    "manuscript": "Theorem 5.1; the complete native simulation and first returns"
+  },
+  "6_verification_axiom_audit.lean": {
+    "source": "src/Audit.lean",
+    "sha256": "e996c384b74b704691108bf9ecdcc6d351047febf87db337ebe95e58f8224660",
+    "manuscript": "Section 6 and Appendix A; transitive axiom audit"
+  }
+}

@@ -1,9 +1,8 @@
 module
 
-public import Monodromy.Algebra
 public import Mathlib.Topology.Homotopy.Lifting
 public import Mathlib.Logic.Function.Conjugate
-public import Mathlib.Analysis.Convex.Contractible
+import Mathlib.Tactic.FunProp
 
 @[expose] public section
 
@@ -186,102 +185,115 @@ end Naturality
 
 end Monodromy.Transport
 
-/-!
-# Protection from a continuous rectangle
+/-! Coverings are preserved by continuous pullback and finite product. -/
 
-A rectangle in the actual covering base identifies its two boundary programs.
-When its horizontal edges are the same migration path, this yields protection
-of the old loop under the actual fiber transport. The rectangle is data; an
-independent intertwining assertion is not assumed.
--/
+namespace Monodromy.CoverPullback
 
+variable {E X B : Type*} [TopologicalSpace E] [TopologicalSpace X] [TopologicalSpace B]
 
-namespace Monodromy.Protection
+abbrev Space (p : E → X) (g : B → X) := {pair : B × E // p pair.2 = g pair.1}
 
-open unitInterval
+def projection (p : E → X) (g : B → X) (state : Space p g) : B := state.val.1
 
-universe u v
+set_option backward.isDefEq.respectTransparency false in
+theorem covering {p : E → X} (cover : IsCoveringMap p) {g : B → X}
+    (continuous_g : Continuous g) : IsCoveringMap (projection p g) := by
+  intro point
+  let I := p ⁻¹' {g point}
+  obtain ⟨discrete, V, in_V, open_V, _, H, over⟩ := cover (g point)
+  let U : Set B := g ⁻¹' V
+  let forward : (projection p g) ⁻¹' U → U × I := fun state =>
+    (⟨state.val.val.1, state.property⟩,
+     (H ⟨state.val.val.2, by
+       change p state.val.val.2 ∈ V
+       rw [state.val.property]
+       exact state.property⟩).2)
+  let backward : U × I → (projection p g) ⁻¹' U := fun coordinates =>
+    let old := H.symm (⟨g coordinates.1.val, coordinates.1.property⟩, coordinates.2)
+    ⟨⟨(coordinates.1.val, old.val),
+      (over old).symm.trans (by simp [old])⟩, coordinates.1.property⟩
+  have left_inverse : Function.LeftInverse backward forward := by
+    intro state
+    apply Subtype.ext
+    apply Subtype.ext
+    apply Prod.ext
+    · rfl
+    · let old : p ⁻¹' V := ⟨state.val.val.2, by
+        change p state.val.val.2 ∈ V
+        rw [state.val.property]
+        exact state.property⟩
+      have same : (⟨g state.val.val.1, state.property⟩, (H old).2) = H old := by
+        apply Prod.ext
+        · apply Subtype.ext
+          exact state.val.property.symm.trans (over old).symm
+        · rfl
+      change (H.symm (⟨g state.val.val.1, state.property⟩, (H old).2)).val = state.val.val.2
+      rw [same, H.symm_apply_apply]
+  have right_inverse : Function.RightInverse backward forward := by
+    intro coordinates
+    apply Prod.ext
+    · apply Subtype.ext
+      rfl
+    · change (H (H.symm (⟨g coordinates.1.val, coordinates.1.property⟩, coordinates.2))).2 = coordinates.2
+      rw [H.apply_symm_apply]
+  let localHomeomorph : (projection p g) ⁻¹' U ≃ₜ U × I :=
+    { toFun := forward
+      invFun := backward
+      left_inv := left_inverse
+      right_inv := right_inverse
+      continuous_toFun := by dsimp [forward]; fun_prop
+      continuous_invFun := by dsimp [backward]; fun_prop }
+  apply IsEvenlyCovered.to_isEvenlyCovered_preimage (I := I)
+  refine ⟨discrete, U, in_V, open_V.preimage continuous_g, ?_, localHomeomorph, ?_⟩
+  · exact (open_V.preimage continuous_g).preimage (continuous_fst.comp continuous_subtype_val)
+  · intro state
+    rfl
 
-variable {X : Type u} [TopologicalSpace X]
+end Monodromy.CoverPullback
 
-/-- Traverse the parameter coordinate at fixed path time. -/
-def horizontal (t : I) : Path ((0 : I), t) (1, t) where
-  toFun s := (s, t)
-  continuous_toFun := continuous_id.prodMk continuous_const
-  source' := rfl
-  target' := rfl
+namespace Monodromy.CoverPullback
 
-/-- Traverse the path coordinate at a fixed parameter. -/
-def vertical (s : I) : Path (s, (0 : I)) (s, 1) where
-  toFun t := (s, t)
-  continuous_toFun := continuous_const.prodMk continuous_id
-  source' := rfl
-  target' := rfl
+variable {E X F Y : Type*}
+  [TopologicalSpace E] [TopologicalSpace X] [TopologicalSpace F] [TopologicalSpace Y]
 
-/-- The actual continuous rectangle fills the two boundary routes. -/
-theorem rectangle_homotopic
-    {x₀₀ x₀₁ x₁₀ x₁₁ : X}
-    (old : Path x₀₀ x₀₁) (new : Path x₁₀ x₁₁)
-    (start : Path x₀₀ x₁₀) (finish : Path x₀₁ x₁₁)
-    (H : C(I × I, X))
-    (left : ∀ t, H (0, t) = old t)
-    (right : ∀ t, H (1, t) = new t)
-    (bottom : ∀ s, H (s, 0) = start s)
-    (top : ∀ s, H (s, 1) = finish s) :
-    (old.trans finish).Homotopic (start.trans new) := by
-  let : ContractibleSpace I :=
-    (convex_Icc (0 : ℝ) 1).contractibleSpace ⟨0, by simp⟩
-  obtain ⟨rectangle⟩ := SimplyConnectedSpace.paths_homotopic
-    ((vertical 0).trans (horizontal 1))
-    ((horizontal 0).trans (vertical 1))
-  have first : (((vertical 0).trans (horizontal 1)).map H.continuous).toContinuousMap =
-      (old.trans finish).toContinuousMap := by
-    ext t
-    change H (((vertical 0).trans (horizontal 1)) t) = (old.trans finish) t
-    rw [Path.trans_apply, Path.trans_apply]
-    split_ifs
-    · exact left _
-    · exact top _
-  have second : (((horizontal 0).trans (vertical 1)).map H.continuous).toContinuousMap =
-      (start.trans new).toContinuousMap := by
-    ext t
-    change H (((horizontal 0).trans (vertical 1)) t) = (start.trans new) t
-    rw [Path.trans_apply, Path.trans_apply]
-    split_ifs
-    · exact bottom _
-    · exact right _
-  exact ⟨ContinuousMap.HomotopyRel.cast (rectangle.map H) first second⟩
-
-/-- The filled rectangle equates the endpoints of the two actual lifted routes. -/
-theorem rectangle_transport
-    {E : Type v} [TopologicalSpace E] {p : E → X} (cov : IsCoveringMap p)
-    {x₀₀ x₀₁ x₁₀ x₁₁ : X}
-    (old : Path x₀₀ x₀₁) (new : Path x₁₀ x₁₁)
-    (start : Path x₀₀ x₁₀) (finish : Path x₀₁ x₁₁)
-    (H : C(I × I, X))
-    (left : ∀ t, H (0, t) = old t)
-    (right : ∀ t, H (1, t) = new t)
-    (bottom : ∀ s, H (s, 0) = start s)
-    (top : ∀ s, H (s, 1) = finish s)
-    (state : Transport.Fiber p x₀₀) :
-    Transport.transport cov new (Transport.transport cov start state) =
-      Transport.transport cov finish (Transport.transport cov old state) := by
-  rw [← Transport.transport_trans, ← Transport.transport_trans]
-  exact Transport.transport_homotopic cov
-    (rectangle_homotopic old new start finish H left right bottom top).symm state
-
-/-- A continuous family of loops protects the old action through actual migration. -/
-theorem loop_family_intertwines
-    {E : Type v} [TopologicalSpace E] {p : E → X} (cov : IsCoveringMap p)
-    {x y : X} (old : Path x x) (new : Path y y) (migration : Path x y)
-    (H : C(I × I, X))
-    (left : ∀ t, H (0, t) = old t)
-    (right : ∀ t, H (1, t) = new t)
-    (bottom : ∀ s, H (s, 0) = migration s)
-    (top : ∀ s, H (s, 1) = migration s) :
-    Algebra.Intertwines (Transport.transportEquiv cov migration)
-      (Transport.transportEquiv cov old) (Transport.transportEquiv cov new) := by
+set_option backward.isDefEq.respectTransparency false in
+theorem prodMap {f : E → X} {g : F → Y} (first : IsCoveringMap f) (second : IsCoveringMap g) :
+    IsCoveringMap (Prod.map f g) := by
+  intro point
+  obtain ⟨first_discrete, U, in_U, open_U, _, H, over_H⟩ := first point.1
+  obtain ⟨second_discrete, V, in_V, open_V, _, K, over_K⟩ := second point.2
+  let I := f ⁻¹' {point.1}
+  let J := g ⁻¹' {point.2}
+  let : DiscreteTopology I := first_discrete
+  let : DiscreteTopology J := second_discrete
+  have source_eq : (Prod.map f g) ⁻¹' (U ×ˢ V) = (f ⁻¹' U) ×ˢ (g ⁻¹' V) := rfl
+  let localHomeomorph : (Prod.map f g) ⁻¹' (U ×ˢ V) ≃ₜ (U ×ˢ V) × (I × J) :=
+    (Homeomorph.setCongr source_eq).trans ((Homeomorph.Set.prod (f ⁻¹' U) (g ⁻¹' V)).trans
+      ((H.prodCongr K).trans ((Homeomorph.prodProdProdComm U I V J).trans
+        ((Homeomorph.Set.prod U V).symm.prodCongr (Homeomorph.refl (I × J))))))
+  apply IsEvenlyCovered.to_isEvenlyCovered_preimage (I := I × J)
+  refine ⟨inferInstance, U ×ˢ V, ⟨in_U, in_V⟩, open_U.prod open_V,
+    (open_U.prod open_V).preimage (first.continuous.prodMap second.continuous), localHomeomorph, ?_⟩
   intro state
-  exact rectangle_transport cov old new migration migration H left right bottom top state
+  exact Prod.ext (over_H _) (over_K _)
 
-end Monodromy.Protection
+end Monodromy.CoverPullback
+
+namespace Monodromy.CoverPullback
+
+variable {X : Type*} [TopologicalSpace X]
+
+theorem identity : IsCoveringMap (id : X → X) := by
+  intro point
+  let U : Set X := Set.univ
+  let H : U ≃ₜ U × Unit :=
+    { toFun := fun value => (value, ())
+      invFun := Prod.fst
+      left_inv := fun _ => rfl
+      right_inv := fun _ => Prod.ext rfl (Subsingleton.elim _ _)
+      continuous_toFun := by fun_prop
+      continuous_invFun := continuous_fst }
+  apply IsEvenlyCovered.to_isEvenlyCovered_preimage (I := Unit)
+  exact ⟨inferInstance, Set.univ, trivial, isOpen_univ, by simp, H, fun _ => rfl⟩
+
+end Monodromy.CoverPullback

@@ -1,0 +1,92 @@
+\begin{thebibliography}{12}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{\texttt{#1}}
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi: #1}\else
+  \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
+
+\bibitem[Blum et~al.(1989)Blum, Shub, and Smale]{blumShubSmale1989}
+Lenore Blum, Mike Shub, and Steve Smale.
+\newblock On a theory of computation and complexity over the real numbers: {NP}-completeness, recursive functions and universal machines.
+\newblock \emph{Bulletin of the American Mathematical Society (New Series)}, 21\penalty0 (1):\penalty0 1--46, 1989.
+\newblock \doi{10.1090/S0273-0979-1989-15750-9}.
+\newblock URL \url{https://profshub.github.io/articles/1989-On_a_theory_of_computation_and_complexity_over_the_real_numbers.pdf}.
+
+\bibitem[Carneiro(2019)]{carneiro2019}
+Mario Carneiro.
+\newblock Formalizing computability theory via partial recursive functions.
+\newblock In John Harrison, John O'Leary, and Andrew Tolmach, editors, \emph{10th International Conference on Interactive Theorem Proving ({ITP} 2019)}, volume 141 of \emph{Leibniz International Proceedings in Informatics}, pages 12:1--12:17. Schloss Dagstuhl -- Leibniz-Zentrum f{\"u}r Informatik, 2019.
+\newblock \doi{10.4230/LIPIcs.ITP.2019.12}.
+\newblock URL \url{https://drops.dagstuhl.de/entities/document/10.4230/LIPIcs.ITP.2019.12}.
+
+\bibitem[Carneiro and {The mathlib Community}(2020)]{mathlibComputability}
+Mario Carneiro and {The mathlib Community}.
+\newblock Modelling partial recursive functions using {Turing} machines.
+\newblock {mathlib4} computability source, 2020.
+\newblock URL \url{https://github.com/leanprover-community/mathlib4/blob/56a005855ea17e0b0958f73ec801ae140b0a1679/Mathlib/Computability/TuringMachine/ToPartrec.lean}.
+\newblock Pinned source and imported machine translations; revision specified in Appendix~B.
+
+\bibitem[de~Moura and Ullrich(2021)]{demouraUllrich2021}
+Leonardo de~Moura and Sebastian Ullrich.
+\newblock The {Lean 4} theorem prover and programming language.
+\newblock In Andr{\'e} Platzer and Geoff Sutcliffe, editors, \emph{Automated Deduction -- {CADE} 28}, volume 12699 of \emph{Lecture Notes in Computer Science}, pages 625--635. Springer, 2021.
+\newblock \doi{10.1007/978-3-030-79876-5_37}.
+\newblock URL \url{https://lean-lang.org/papers/lean4.pdf}.
+
+\bibitem[Floater and Lyche(2007)]{floaterLyche2007}
+Michael~S. Floater and Tom Lyche.
+\newblock Two chain rules for divided differences and {Fa\`a di Bruno}'s formula.
+\newblock \emph{Mathematics of Computation}, 76\penalty0 (258):\penalty0 867--877, 2007.
+\newblock \doi{10.1090/S0025-5718-06-01916-8}.
+
+\bibitem[Forster(1981)]{forster1981}
+Otto Forster.
+\newblock \emph{Lectures on {Riemann} Surfaces}, volume~81 of \emph{Graduate Texts in Mathematics}.
+\newblock Springer-Verlag, New York, 1981.
+\newblock \doi{10.1007/978-1-4612-5961-9}.
+\newblock URL \url{https://link.springer.com/book/10.1007/978-1-4612-5961-9}.
+\newblock Translated by Bruce Gilligan.
+
+\bibitem[Gra{\c{c}}a and Zhong(2023)]{gracaZhong2023}
+Daniel~S. Gra{\c{c}}a and Ning Zhong.
+\newblock Analytic one-dimensional maps and two-dimensional ordinary differential equations can robustly simulate {Turing} machines.
+\newblock \emph{Computability}, 12\penalty0 (2):\penalty0 117--144, 2023.
+\newblock \doi{10.3233/COM-210381}.
+\newblock URL \url{https://arxiv.org/abs/2109.15073}.
+
+\bibitem[Gra{\c{c}}a et~al.(2005)Gra{\c{c}}a, Campagnolo, and Buescu]{gracaCampagnoloBuescu2005}
+Daniel~S. Gra{\c{c}}a, Manuel~L. Campagnolo, and Jorge Buescu.
+\newblock Robust simulations of {Turing} machines with analytic maps and flows.
+\newblock In S.~Barry Cooper, Benedikt L{\"o}we, and Leen Torenvliet, editors, \emph{New Computational Paradigms}, volume 3526 of \emph{Lecture Notes in Computer Science}, pages 169--179. Springer, 2005.
+\newblock \doi{10.1007/11494645_21}.
+\newblock URL \url{https://sqigmath.tecnico.ulisboa.pt/pub/GracaDS/05-GCB-stable.pdf}.
+
+\bibitem[Hatcher(2002)]{hatcher2002}
+Allen Hatcher.
+\newblock \emph{Algebraic Topology}.
+\newblock Cambridge University Press, 2002.
+\newblock ISBN 978-0-521-79540-1.
+\newblock URL \url{https://pi.math.cornell.edu/~hatcher/AT/ATpage.html}.
+
+\bibitem[Koiran and Moore(1999)]{koiranMoore1999}
+Pascal Koiran and Cristopher Moore.
+\newblock Closed-form analytic maps in one and two dimensions can simulate universal {Turing} machines.
+\newblock \emph{Theoretical Computer Science}, 210\penalty0 (1):\penalty0 217--223, 1999.
+\newblock \doi{10.1016/S0304-3975(98)00117-0}.
+\newblock URL \url{https://sites.santafe.edu/~moore/pubs/elem.html}.
+
+\bibitem[Shannon(1941)]{shannon1941}
+Claude~E. Shannon.
+\newblock Mathematical theory of the differential analyzer.
+\newblock \emph{Journal of Mathematics and Physics}, 20\penalty0 (1--4):\penalty0 337--354, 1941.
+\newblock \doi{10.1002/sapm1941201337}.
+\newblock URL \url{https://onlinelibrary.wiley.com/doi/10.1002/sapm1941201337}.
+
+\bibitem[{The mathlib Community}(2020)]{mathlib2020}
+{The mathlib Community}.
+\newblock The {Lean} mathematical library.
+\newblock In \emph{Proceedings of the 9th {ACM SIGPLAN} International Conference on Certified Programs and Proofs}, pages 367--381. Association for Computing Machinery, 2020.
+\newblock \doi{10.1145/3372885.3373824}.
+\newblock URL \url{https://leanprover-community.github.io/papers/mathlib-paper.pdf}.
+
+\end{thebibliography}

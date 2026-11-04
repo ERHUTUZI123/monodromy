@@ -1,163 +1,143 @@
 module
 
 public import Monodromy.NativeIO
-public import Monodromy.Effectiveness
 public import Monodromy.ForwardBoundary
 
 /-!
-# The computational structure of continuation
+# The computational class of native continuation
 
-The interface is fixed before a program is chosen. Integer inputs prepare
-canonical branch words; completed native states have one fixed numeric
-readout. Finite cubic-cover syntax then realizes exactly the partial
-recursive functions, with complete results and stopping semantics.
+Finite words of the five geometric loops, with internal finite-root routing,
+realize exactly the partial recursive functions under one fixed numeric
+interface. Removing the two zero-conditional loops leaves a finite stopping
+quotient and strictly reduces this class.
 -/
 
 @[expose] public section
 
 namespace Monodromy.Structure
 
-open CoverExpressions
+open CoupledContinuation NativeInterface
 
-/-- Interpreting a complete native result uses the fixed integer-grid representation. -/
-theorem mem_native (program : Program 3) (initial result : Program.IntState 3) :
-    Program.init result ∈ Program.evalReal program (Program.init initial) ↔
-      result ∈ Program.evalInt program initial := by
-  rw [Program.evalReal_init, Part.map_eq_map, Part.mem_map_iff]
-  constructor
-  · rintro ⟨state, finished, same⟩
-    exact Program.init_injective same ▸ finished
-  · intro finished
-    exact ⟨result, finished, rfl⟩
+/-- The fixed numeric graph is read directly from actual native execution. -/
+def Computes {degree : ℕ} [NeZero degree] (native : Program degree)
+    (function : ℕ → Part ℕ) : Prop :=
+  ∀ input value, value ∈ function input ↔ ∃ labels : Labels,
+    Labels.prepare labels ∈ native.eval (Labels.prepare (inputLabels input)) ∧
+      outputLabels labels = value
 
-/-- Every input and output uses the same representation, independently of the program. -/
-def Computes (program : Program 3) (function : ℕ → Part ℕ) : Prop :=
-  ∀ input value, value ∈ function input ↔
-    ∃ state : Program.IntState 3,
-      Program.init state ∈ Program.evalReal program (Program.init (NativeIO.input input)) ∧
-        NativeIO.output state = value
-
-/-- The effective continuation language uses three retained branches and one cubic observation. -/
+/-- Positive cover degrees are indexed by their predecessor. -/
 def Realizable (function : ℕ → Part ℕ) : Prop :=
-  ∃ program : Program 3, program.UsesRadix 3 ∧ Computes program function
+  ∃ degree : ℕ, ∃ native : Program (degree + 1), Computes native function
 
-/-- The native graph and the complete partial integer result are equivalent specifications. -/
-theorem computes_iff (program : Program 3) (function : ℕ → Part ℕ) :
-    Computes program function ↔
-      ∀ input, NativeIO.output <$> Program.evalInt program (NativeIO.input input) = function input := by
+/-- The same interface defines the sublanguage with both conditional loops removed. -/
+def ProbeFreeRealizable (function : ℕ → Part ℕ) : Prop :=
+  ∃ degree : ℕ, ∃ native : Program (degree + 1), native.ProbeFree ∧ Computes native function
+
+theorem computes_iff {degree : ℕ} [NeZero degree]
+    (native : Program degree) (function : ℕ → Part ℕ) :
+    Computes native function ↔
+      ∀ input, outputLabels <$> native.evalInt (inputLabels input) = function input := by
   constructor
   · intro correct input
     apply Part.ext
     intro value
     rw [Part.map_eq_map, Part.mem_map_iff]
     have meaning := correct input value
-    simp_rw [mem_native] at meaning
+    simp_rw [NativeInterface.prepared_result_iff] at meaning
     exact meaning.symm
   · intro correct input value
     rw [← correct input, Part.map_eq_map, Part.mem_map_iff]
-    simp_rw [mem_native]
+    simp_rw [NativeInterface.prepared_result_iff]
 
-theorem computes_dom {program : Program 3} {function : ℕ → Part ℕ}
-    (correct : Computes program function) (input : ℕ) :
-    (Program.evalReal program (Program.init (NativeIO.input input))).Dom ↔ (function input).Dom := by
-  rw [Program.evalReal_init, ← (computes_iff program function).mp correct input]
+theorem computes_dom {degree : ℕ} [NeZero degree] {native : Program degree}
+    {function : ℕ → Part ℕ} (correct : Computes native function) (input : ℕ) :
+    (native.eval (Labels.prepare (inputLabels input))).Dom ↔ (function input).Dom := by
+  rw [Program.eval_prepareInt, ← (computes_iff native function).mp correct input]
   rfl
 
-theorem computes_divergence {program : Program 3} {function : ℕ → Part ℕ}
-    (correct : Computes program function) (input : ℕ) :
-    ¬ (Program.evalReal program (Program.init (NativeIO.input input))).Dom ↔ ¬ (function input).Dom :=
+theorem computes_divergence {degree : ℕ} [NeZero degree] {native : Program degree}
+    {function : ℕ → Part ℕ} (correct : Computes native function) (input : ℕ) :
+    ¬ (native.eval (Labels.prepare (inputLabels input))).Dom ↔ ¬ (function input).Dom :=
   not_congr (computes_dom correct input)
 
-/-- Finite cover syntax and its fixed numeric interface introduce only partial recursive behavior. -/
-theorem partrec_of_realizable {function : ℕ → Part ℕ} (realized : Realizable function) : Partrec function := by
-  obtain ⟨program, _, correct⟩ := realized
-  have execution : Partrec (fun input =>
-      NativeIO.output <$> Program.evalInt program (NativeIO.input input)) :=
-    ((Program.partrec_evalInt program).comp NativeIO.primrec_input.to_comp).map
-      (NativeIO.primrec_output.to_comp.comp Computable.snd).to₂
-  exact execution.of_eq ((computes_iff program function).mp correct)
+theorem realizable_of_computes {degree : ℕ} [NeZero degree]
+    {function : ℕ → Part ℕ} (native : Program degree) (correct : Computes native function) :
+    Realizable function := by
+  obtain ⟨predecessor, rfl⟩ := Nat.exists_eq_succ_of_ne_zero (NeZero.ne degree)
+  exact ⟨predecessor, native, correct⟩
 
-/-- Finite Turing compilation gives one native program for each partial recursive function. -/
-theorem realizable_of_partrec {function : ℕ → Part ℕ} (effective : Partrec function) : Realizable function := by
-  obtain ⟨source, cubic, simulation⟩ := NativeLowerBound.every_partrec effective
-  refine ⟨NativeLowerBound.program source, cubic, (computes_iff _ _).mpr ?_⟩
-  intro input
-  apply Part.ext
-  intro value
-  rw [Part.map_eq_map, Part.mem_map_iff]
-  constructor
-  · rintro ⟨state, finished, read_value⟩
-    have defined : (function input).Dom :=
-      (simulation input).1.mp (Part.dom_iff_mem.mpr ⟨state, finished⟩)
-    obtain ⟨answer, answer_finished⟩ := Part.dom_iff_mem.mp defined
-    have source_finished : FormalCompilation.halt0 source [answer] ∈
-        (fun result => FormalCompilation.halt0 source [result]) <$> function input :=
-      (Part.mem_map_iff _).mpr ⟨answer, answer_finished, rfl⟩
-    obtain ⟨represented, represented_finished, representation⟩ :=
-      ((simulation input).2 _).mp source_finished
-    have same := Part.mem_unique finished represented_finished
-    rw [same, NativeIO.output_represents source answer represented representation] at read_value
-    exact read_value ▸ answer_finished
-  · intro finished
-    have source_finished : FormalCompilation.halt0 source [value] ∈
-        (fun result => FormalCompilation.halt0 source [result]) <$> function input :=
-      (Part.mem_map_iff _).mpr ⟨value, finished, rfl⟩
-    obtain ⟨state, native_finished, represented⟩ := ((simulation input).2 _).mp source_finished
-    exact ⟨state, native_finished, NativeIO.output_represents source value state represented⟩
+/-- The finite syntax and fixed effective I/O give the partial-recursive upper bound. -/
+theorem partrec_of_realizable {function : ℕ → Part ℕ}
+    (realized : Realizable function) : Partrec function := by
+  obtain ⟨degree, native, correct⟩ := realized
+  exact (NativeInterface.effective_execution native).of_eq
+    ((computes_iff native function).mp correct)
 
-/-- Exact computational characterization with fixed I/O and the actual native execution semantics. -/
+/-- The actual Turing-to-counter-to-continuation compiler gives the matching lower bound. -/
+theorem realizable_of_partrec {function : ℕ → Part ℕ}
+    (effective : Partrec function) : Realizable function := by
+  obtain ⟨source, correct⟩ := NativeInterface.every_partrec_graph effective
+  exact realizable_of_computes (NativeInterface.program source) correct
+
+/-- Exact characterization under fixed input/output maps and genuine native execution. -/
 theorem continuation_characterization (function : ℕ → Part ℕ) :
     Realizable function ↔ Partrec function :=
   ⟨partrec_of_realizable, realizable_of_partrec⟩
 
-/-- Every partial recursive function has a globally analytic realization by actual continuation. -/
-theorem analytic_continuation_realization {function : ℕ → Part ℕ} (effective : Partrec function) :
-    ∃ program : Program 3, program.UsesRadix 3 ∧ Computes program function ∧
-      (∀ point, AnalyticAt ℝ (Program.nextReal program) point) ∧
-      ∀ (rounds : ℕ) (memory : Program.Memory 3) (index : Fin 3),
-        Transport.transport Circle.isCoveringMap_exp (Program.runPath program rounds memory index)
-          (Program.coordinate memory index) =
-          Program.coordinate (((Program.advance program)^[rounds]) memory) index := by
-  obtain ⟨program, cubic, correct⟩ := realizable_of_partrec effective
-  exact ⟨program, cubic, correct, Program.analyticAt_nextReal program, Program.run_transport program⟩
+theorem realizable_of_probeFree {function : ℕ → Part ℕ}
+    (realized : ProbeFreeRealizable function) : Realizable function := by
+  obtain ⟨degree, native, _, correct⟩ := realized
+  exact ⟨degree, native, correct⟩
 
-/-- Removing descent strictly reduces the realizable functions with the fixed numeric interface. -/
-theorem descent_strictly_extends : ∃ function : ℕ → Part ℕ, Realizable function ∧
-    ∀ program : Program 3, program.Forward → ¬ Computes program function := by
+/-- Finite stopping observations remain decidable after the same fixed input preparation. -/
+theorem no_probeFree_hardFunction {degree : ℕ} [NeZero degree]
+    (native : Program degree) (free : native.ProbeFree) :
+    ¬ Computes native ForwardBoundary.hardFunction := by
+  intro correct
+  have decision : ComputablePred (fun input : ℕ =>
+      (native.eval (Labels.prepare (inputLabels input))).Dom) :=
+    ForwardBoundary.computablePred_comp
+      (initial := inputLabels)
+      (predicate := fun labels : Labels => (native.eval (Labels.prepare labels)).Dom)
+      (Program.probeFree_native_halting_primrec native free).computablePred
+      NativeInterface.primrec_inputLabels.to_comp
+  exact ForwardBoundary.hardFunction_undecidable
+    (decision.of_eq (fun input => computes_dom correct input))
+
+/-- The conditional monodromy loops strictly extend the realizable partial functions. -/
+theorem conditional_gates_strictly_extend :
+    ∃ function : ℕ → Part ℕ, Realizable function ∧ ¬ ProbeFreeRealizable function := by
   refine ⟨ForwardBoundary.hardFunction,
     realizable_of_partrec ForwardBoundary.hardFunction_partrec, ?_⟩
-  intro program forward correct
-  apply ForwardBoundary.no_forward_hardFunction program forward NativeIO.input NativeIO.primrec_input.to_comp
-  intro input
-  exact (congrArg Part.Dom ((computes_iff program _).mp correct input)).to_iff
+  rintro ⟨degree, native, free, correct⟩
+  exact no_probeFree_hardFunction native free correct
 
-/-- Presence of a descent expression alone places no lower bound on a program's stopping behavior. -/
-theorem descent_can_be_inactive : ∃ program : Program 1,
-    program.UsesRadix 3 ∧ ¬ program.Forward ∧
-      ∀ state, program.evalInt state = Part.some state := by
-  let program : Program 1 := ⟨fun _ => .descend 2 (.coord 0), .constant true⟩
-  refine ⟨program, ⟨fun _ => ⟨rfl, trivial⟩, trivial⟩, fun forward => forward.1 0, ?_⟩
-  intro state
-  apply Part.eq_some_iff.mpr
-  exact StateTransition.mem_eval.mpr ⟨.refl, rfl⟩
+end Monodromy.Structure
 
-universe u v
+namespace Monodromy.Structure
 
-/-- A finite closed stopping observation gives a computable halting domain whenever its input is computable. -/
-theorem closed_observation_barrier {S F : Type u} {Input : Type v}
-    [Fintype F] [Primcodable F] [Primcodable Input]
-    (observe : S → F) (next : S → S) (advance : F → F) (halt : F → Bool)
-    (closed : ∀ state, observe (next state) = advance (observe state))
-    (initial : Input → S) (effective : Computable (fun input => observe (initial input))) :
-    ComputablePred (fun input =>
-      (StateTransition.eval (Observation.stopped next (fun state => halt (observe state)))
-        (initial input)).Dom) := by
-  have test : PrimrecPred (fun state : F => Observation.finiteHalts advance halt state = true) :=
-    Primrec.eq.comp (Primrec.dom_finite _) (Primrec.const true)
-  have finite_domain : ComputablePred (fun state : F =>
-      (StateTransition.eval (Observation.stopped advance halt) state).Dom) :=
-    (test.of_eq (Observation.finiteHalts_eq_true advance halt)).computablePred
-  exact (ForwardBoundary.computablePred_comp finite_domain effective).of_eq
-    (fun input => (Observation.observed_dom observe next advance halt closed (initial input)).symm)
+open CoupledContinuation NativeInterface
+
+/-- The direct analytic comparator has exactly the native program's fixed numeric graph. -/
+theorem analytic_computes_iff {degree : ℕ} [NeZero degree]
+    (program : Program degree) (function : ℕ → Part ℕ) :
+    (∀ input value, value ∈ function input ↔ ∃ labels : Labels,
+      AnalyticComparison.embed labels ∈ AnalyticComparison.eval program
+        (AnalyticComparison.embed (inputLabels input)) ∧ outputLabels labels = value) ↔
+      Computes program function := by
+  simp_rw [AnalyticComparison.result_iff]
+  rfl
+
+/-- The same finite programs have globally real analytic successors in three real coordinates. -/
+theorem analytic_realization {function : ℕ → Part ℕ} (effective : Partrec function) :
+    ∃ degree : ℕ, ∃ program : Program (degree + 1),
+      (∀ state, AnalyticAt ℝ (AnalyticComparison.next program) state) ∧
+      (∀ state, AnalyticAt ℝ (AnalyticComparison.halt program) state) ∧
+      ∀ input value, value ∈ function input ↔ ∃ labels : Labels,
+        AnalyticComparison.embed labels ∈ AnalyticComparison.eval program
+          (AnalyticComparison.embed (inputLabels input)) ∧ outputLabels labels = value := by
+  obtain ⟨degree, program, correct⟩ := realizable_of_partrec effective
+  exact ⟨degree, program, AnalyticComparison.analyticAt_next program,
+    AnalyticComparison.analyticAt_halt program, (analytic_computes_iff program function).mpr correct⟩
 
 end Monodromy.Structure

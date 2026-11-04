@@ -1,56 +1,18 @@
 module
 
-public import Monodromy.Lifting
-public import Monodromy.Finite
-public import Monodromy.Observation
-public import Monodromy.Feedback
-public import Monodromy.Logarithm
-public import Monodromy.Choice
-public import Monodromy.Autonomy
-public import Monodromy.Cubic
-public import Monodromy.Counter
-public import Monodromy.ProgramCounter
-public import Monodromy.Lattice
-public import Monodromy.Control
-public import Monodromy.Radix
-public import Monodromy.Tower
-public import Monodromy.TwoStacks
-public import Monodromy.Machine
-public import Monodromy.Universality
-public import Monodromy.Scaling
-public import Monodromy.Cosine
-public import Monodromy.Resolution
-public import Monodromy.CoverExpressions
-public import Monodromy.CoverTables
-public import Monodromy.CoverPrograms
-public import Monodromy.CoverCompiler
-public import Monodromy.CoverSyntax
-public import Monodromy.FiniteSupport
 public import Monodromy.FormalCompilation
-public import Monodromy.Effectiveness
-public import Monodromy.NativeLowerBound
-public import Monodromy.CanonicalIO
-public import Monodromy.BlockCoding
-public import Monodromy.NativeIO
-public import Monodromy.ForwardBoundary
 public import Monodromy.Structure
 
 /-!
 # Monodromy
 
-A root is memory; continuation carries it through a computation.
+Two persistent logarithmic branches feed a third through successive actual
+covering lifts. Five fixed loops provide memory shifts, conditional winding,
+and control motion. Finite root observation selects words of these loops.
 
-The quartic is a fixed finite example. Finite persistent state has precise
-computational bounds; logarithmic branches provide integer memory.
-A marked regular root gives an analytic fiber selector. Internal feedback
-uses it to generate paths, write state, and change subsequent selection.
-Every finite run of the return system agrees with actual path transport.
-
-An exponential power-cover tower gives ordered word memory. Two word branches
-and a finite analytic controller simulate every finite TM0 table, preserving
-the complete tape, halting, and divergence. Native finite runs are realized
-by their own generated continuation paths.
-
-The cubic supplies a second mechanism: one fixed loop acts selectively on
-different roots, as proved from its explicit continuous lifts.
+The finite native interpreter simulates every finite Post–Turing table,
+preserving complete configurations, exact first returns, halting, and
+divergence. Every finite execution is realized by the matching covering lifts.
+Fixed effective numeric interfaces characterize its partial recursive content;
+removing the conditional loops leaves a finite stopping quotient.
 -/

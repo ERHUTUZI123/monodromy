@@ -12,7 +12,3 @@ require mathlib from git
 
 @[default_target]
 lean_lib Monodromy
-
-@[default_target]
-lean_exe monodromy where
-  root := `Main
