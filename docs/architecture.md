@@ -140,14 +140,49 @@ W_j=B_1^{\,\pi(j)-j}.
 `step_firstReturn` 和 `result_actual_lifts` 分别给出精确周期及真实路径证书。
 `eval_iota_on` 将相同结论限制到一个保持的合法不变量；入口条件与非负性
 属于对应证明，执行表保持相同。
-当前还需构造任意图灵机的可逆源编码，并证明其自然数域与历史编码的不变量。
 
-`Counter.Reversible.Multiply` 给出一个已接通的算术实例：固定 p>0，有限图
-用一段循环把第一项转成第二项的 p 倍，再用另一段循环移回。
-`native_eval` 证明同一几何程序对任意自然数 n 将 (n,0) 变成 (pn,0)。
-合法不变量保证减法安全及测试入口条件；十二条源边仍只编译为原来的路径词。
-反转源图交换边端点并取负位移，`reverse_native_eval` 在倍数输入上还原原数。
-下一步将余数保留在有限控制中，建立适用于所有自然输入的商余操作。
+`Counter.Reversible.Radix` 用同一个有限图完成商余分解与其逆。固定 p>0，
+从 (n,0) 出发，图在有限出口 r=n mod p 返回 (n/p,0)；`reverse_pack`
+反转同一张表，从出口 r 的 (q,0) 恢复 (pq+r,0)。`native_eval` 与
+`native_reverse_pack` 将这两个方向接到实际几何执行。余数由有限控制保留，
+工作空间在边界归零；倍乘是 r=0 的特例。
+
+`Counter.Reversible.Recording` 将任意自然数计数器程序编译成有限的部分可逆
+图。每条源指令把旧地址和分支编码为非零数字 d，以 H↦(2m+1)H+d 保存
+历史；记忆写入由反向 radix 图执行。`deterministic` 与 `targetCompatible`
+保证整个整数状态域的定义步前驱唯一。`step_firstReturn` 证明每条源指令的
+实际执行避开其余分派边界，随后携带完整源配置和历史返回，工作寄存器为零。
+
+`ReversibleTuring` 将纸带模拟接到这张记录图。`macroStep` 只执行固定图并
+观察有限控制标记；源图灵机转移出现在对应证明中。`macroStep_live`、
+`result_iff`、`halting_iff`、`divergence_iff` 分别保留单步、完整终态、停机与
+发散，`step_retraces` 沿反转图恢复前态及其历史。这一源表示使用四个整数
+计数器，随后由 `PrimeCompression` 压缩到两个计数器；原生几何执行器始终
+使用同一三个根和五个回路。
+
+压缩以素数指数编码这些中间寄存器。`PrimeCode.Basis` 给出统一有限维
+编码及其增减、整除规律；`Recording.unitShift` 与
+`encode_reaches_nonnegative` 证明实际图只作单位位移，并在全部中间状态
+保持非负。`RadixObservation` 通过正向余数出口与反向入口的直接同一化，
+实现 (n,0,j)↦(n,0,π_(n mod p)(j))。置换只决定有限图的接线；运行沿既有
+radix 边到达实际出口，再逆向恢复 n。`native_eval` 已将这一操作接到同一
+三根执行器。`PortNetwork` 将实际出口与入口直接识别；`PrimeCompression.table`
+组合乘法、商余与恢复模块，保持 `Deterministic` 与 `TargetCompatible`。
+工作空间在源返回边界归零，历史保留在素数指数中。
+
+`ReversibleNativeTuring` 将完整压缩接到几何执行。有限标记只选择源顶点的
+阶段零返回；所有边端口与其余阶段继续执行。同一原生词表给出正向宏
+`macroStep`，逆词表配合同一标记给出 `reverseMacro`。若源转移 c↦c′，则
+存在实际生成的 H′>H，使
+\[
+T_M(\iota_M(c,H))=\iota_M(c',H'),\qquad
+T_M^{-}(\iota_M(c',H'))=\iota_M(c,H).
+\]
+`step_return_pair` 证明两个等式及首次返回；`native_universality` 同时保留
+完整结果、停机、发散与所有有限执行的真实提升。两宏的输入只有当前状态，
+步数与目标状态出现在正确性证明中。
+
+上述边界在指定路径词完成后采样；连续路径中途的任意命中不触发路由或停止。
 
 ## 有限程序与计算能力
 

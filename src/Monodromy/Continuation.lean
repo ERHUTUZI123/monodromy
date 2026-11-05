@@ -1808,7 +1808,7 @@ theorem execute_runDriver (program : Program degree) (count : ℕ) (state : Memo
       change execute (program.runDriver count (program.advance state)) (program.advance state) = _
       rw [induction_hypothesis, Function.iterate_succ_apply]
 
-private theorem advance_of_step (program : Program degree) {first last : Memory}
+theorem advance_of_step (program : Program degree) {first last : Memory}
     (transition : program.step first = some last) : program.advance first = last := by
   unfold step at transition
   split at transition
@@ -3050,5 +3050,116 @@ theorem source_defined_injective (sourceStep : Source → Option Source)
     {first second last : Source}
     (left : sourceStep first = some last) (right : sourceStep second = some last) : first = second :=
   faithful (backward_unique injective (simulates first last left) (simulates second last right))
+
+end Monodromy.ReversibleReturn
+
+
+/-! Marked inverse execution and first-return transport. -/
+
+namespace Monodromy.CoupledContinuation.Program
+
+noncomputable section
+
+variable {degree : ℕ} [NeZero degree]
+
+/-- Run the inverse word table, stopping at the same finite root marks. -/
+def boundaryInverse (backward boundary : Program degree) : Program degree :=
+  { backward with stop := boundary.stop }
+
+/-- Leave the current mark once, then use the inverse words until the next mark. -/
+def reverseReturn (backward boundary : Program degree) (state : Memory) : Part Memory :=
+  (boundaryInverse backward boundary).eval (backward.advance state)
+
+/-- The same marked inverse execution recovers the start of any native first-return trace. -/
+theorem reverseReturn_of_firstReturn (forward backward boundary : Program degree)
+    (inverse : Function.LeftInverse backward.advance forward.advance)
+    {first after last : Memory} (initial : forward.step first = some after)
+    (interior : Relation.ReflTransGen
+      (fun left right => forward.step left = some right ∧ boundary.haltSignal left ≠ 1)
+      after last)
+    (marked : boundary.haltSignal first = 1) :
+    reverseReturn backward boundary last = Part.some first := by
+  have undo : ∀ {left right}, forward.step left = some right → backward.advance right = left := by
+    intro left right edge
+    unfold step at edge
+    split at edge
+    · contradiction
+    · exact (congrArg backward.advance (Option.some.inj edge)).symm.trans (inverse left)
+  have retraced : ∃ previous, backward.advance last = previous ∧
+      StateTransition.Reaches (boundaryInverse backward boundary).step previous first := by
+    induction interior with
+    | refl => exact ⟨first, undo initial, Relation.ReflTransGen.refl⟩
+    | @tail left right _ edge previous =>
+        obtain ⟨before, arrived, rest⟩ := previous
+        refine ⟨left, undo edge.1, Relation.ReflTransGen.head ?_ rest⟩
+        change (if boundary.haltSignal left = 1 then none else some (backward.advance left)) =
+          some before
+        rw [ite_eq_right edge.2, arrived]
+  obtain ⟨previous, arrived, rest⟩ := retraced
+  unfold reverseReturn
+  rw [arrived]
+  apply Part.eq_some_iff.mpr
+  exact StateTransition.mem_eval.mpr ⟨rest, by
+    change (if boundary.haltSignal first = 1 then none else some (backward.advance first)) = none
+    rw [ite_eq_left marked]⟩
+
+end
+
+end Monodromy.CoupledContinuation.Program
+
+namespace Monodromy.ReversibleReturn
+
+variable {State : Type*}
+
+/-- A relational execution avoiding the boundary is a positive first return of its advance. -/
+theorem firstReturn_of_relation {advance : State → State} {boundary : State → Prop}
+    {transition : State → State → Prop}
+    (executes : ∀ {left right}, transition left right → advance left = right)
+    {first after last : State} (initial : transition first after)
+    (interior : Relation.ReflTransGen
+      (fun left right => transition left right ∧ ¬ boundary left) after last)
+    (marked_first : boundary first) (marked_last : boundary last) :
+    FirstReturn advance boundary first last := by
+  have traced : ∃ count : ℕ, 0 < count ∧ advance^[count] first = last ∧
+      ∀ middle : ℕ, 0 < middle → middle < count → ¬ boundary (advance^[middle] first) := by
+    clear marked_first marked_last
+    induction interior with
+    | refl =>
+        refine ⟨1, by omega, executes initial, ?_⟩
+        intro middle positive before
+        omega
+    | @tail left right _ edge previous =>
+        obtain ⟨count, positive, reached, inside⟩ := previous
+        refine ⟨count + 1, by omega, ?_, ?_⟩
+        · rw [Function.iterate_succ_apply', reached]
+          exact executes edge.1
+        · intro middle after_start before_end
+          by_cases before : middle < count
+          · exact inside middle after_start before
+          · have equal : middle = count := by omega
+            rw [equal, reached]
+            exact edge.2
+  obtain ⟨count, positive, reached, inside⟩ := traced
+  exact ⟨count, positive, reached, marked_first, marked_last, inside⟩
+
+/-- A left inverse retraces any first return, with exactly the same return length. -/
+theorem inverse_firstReturn {advance backward : State → State} {boundary : State → Prop}
+    (inverse : Function.LeftInverse backward advance) {first last : State}
+    (run : FirstReturn advance boundary first last) :
+    FirstReturn backward boundary last first := by
+  obtain ⟨count, positive, reached, marked_first, marked_last, inside⟩ := run
+  have retraced (round : ℕ) (bound : round ≤ count) :
+      backward^[round] last = advance^[count - round] first := by
+    have parts : round + (count - round) = count := by omega
+    have decompose : last = advance^[round] (advance^[count - round] first) := by
+      rw [← Function.iterate_add_apply, parts]
+      exact reached.symm
+    rw [decompose]
+    exact (inverse.iterate round) _
+  refine ⟨count, positive, ?_, marked_last, marked_first, ?_⟩
+  · simpa only [Nat.sub_self, Function.iterate_zero_apply] using retraced count (by omega)
+  · intro middle after_start before_end marked
+    rw [retraced middle (by omega)] at marked
+    exact inside (count - middle) (by omega) (by omega) marked
 
 end Monodromy.ReversibleReturn

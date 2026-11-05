@@ -23,7 +23,8 @@ run_cmd do
 open Lean Elab Command in
 run_cmd do
   let forbidden : Array Name := #[
-    `Turing.TM0.step, `Monodromy.Counter.step,
+    `Turing.TM0.step, `Turing.TM1.step, `Turing.TM2.step, `Nat.Partrec.Code.eval,
+    `Monodromy.Counter.step, `Monodromy.Counter.Recorded.step,
     `Monodromy.Counter.Reversible.step, `Monodromy.Counter.Reversible.eval,
     `Monodromy.Counter.Reversible.Action.apply, `Monodromy.Counter.Reversible.Action.enabled,
     `Monodromy.ReversibleControl.enabled, `Monodromy.CoupledContinuation.Program.indexInt,
@@ -32,8 +33,21 @@ run_cmd do
     `Monodromy.CoupledContinuation.Program.advance,
     `Monodromy.CoupledContinuation.Program.runDriver,
     `Monodromy.ReversibleCompilation.haltingProgram,
-    `Monodromy.ReversibleCompilation.reverseProgram]
+    `Monodromy.ReversibleCompilation.reverseProgram,
+    `Monodromy.Counter.Reversible.Recording.table,
+    `Monodromy.Counter.Reversible.RadixObservation.table,
+    `Monodromy.Counter.Reversible.PrimeCompression.table,
+    `Monodromy.ReversibleTuring.table,
+    `Monodromy.ReversibleTuring.Compression.table,
+    `Monodromy.ReversibleNativeTuring.program,
+    `Monodromy.ReversibleNativeTuring.reverseProgram,
+    `Monodromy.ReversibleNativeTuring.boundaryProgram,
+    `Monodromy.ReversibleNativeTuring.macroStep,
+    `Monodromy.ReversibleNativeTuring.reverseMacro]
   let environment ← getEnv
+  for name in pending do
+    unless (environment.find? name).isSome do
+      throwError "Missing native definition audit root {name}"
   let mut visited : NameSet := {}
   while !pending.isEmpty do
     let name := pending.head!
@@ -46,7 +60,10 @@ run_cmd do
         if let some body := declaration.value? then
           pending := body.getUsedConstants.toList ++ pending
   for required in #[`Monodromy.CoupledContinuation.lower,
-      `Monodromy.CoupledContinuation.feed, `Monodromy.CoupledContinuation.upper] do
+      `Monodromy.CoupledContinuation.feed, `Monodromy.CoupledContinuation.upper,
+      `Monodromy.Counter.Reversible.PrimeCompression.rawTable,
+      `Monodromy.Counter.Reversible.Radix.table,
+      `Monodromy.Counter.Reversible.PortNetwork.relationLink] do
     unless visited.contains required do
       throwError "Native definition no longer reaches actual lift component {required}"
   logInfo "Native definition audit: actual lifts present; source interpreters absent."

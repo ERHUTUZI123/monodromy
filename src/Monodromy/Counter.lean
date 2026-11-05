@@ -593,6 +593,97 @@ end Monodromy.CounterContinuation
 
 namespace Monodromy.PrimeCode
 
+/-- A finite family of distinct primes represents independent natural registers. -/
+structure Basis (n : ℕ) where
+  prime : Fin n → ℕ
+  isPrime : ∀ index, (prime index).Prime
+  distinct : Function.Injective prime
+
+namespace Basis
+
+variable {n : ℕ} (basis : Basis n)
+
+def encode (registers : Fin n → ℕ) : ℕ := ∏ index, basis.prime index ^ registers index
+
+def decode (code : ℕ) : Fin n → ℕ := fun index => code.factorization (basis.prime index)
+
+theorem encode_positive (registers : Fin n → ℕ) : 0 < basis.encode registers := by
+  apply Finset.prod_pos
+  intro index _
+  exact pow_pos (basis.isPrime index).pos _
+
+/-- Prime valuations recover every register, uniformly in the finite dimension. -/
+theorem factorization_encode (registers : Fin n → ℕ) (index : Fin n) :
+    (basis.encode registers).factorization (basis.prime index) = registers index := by
+  unfold encode
+  rw [Nat.factorization_prod_apply (fun other _ => pow_ne_zero _ (basis.isPrime other).ne_zero)]
+  rw [Finset.sum_eq_single index]
+  · exact Nat.factorization_pow_self (basis.isPrime index)
+  · intro other _ different
+    rw [(basis.isPrime other).factorization_pow]
+    exact Finsupp.single_eq_of_ne' (basis.distinct.ne different)
+  · simp
+
+theorem decode_encode : Function.LeftInverse basis.decode basis.encode := by
+  intro registers
+  funext index
+  exact basis.factorization_encode registers index
+
+theorem encode_injective : Function.Injective basis.encode := basis.decode_encode.injective
+
+@[simp] theorem encode_zero : basis.encode (fun _ => 0) = 1 := by simp [encode]
+
+theorem encode_increment (registers : Fin n → ℕ) (index : Fin n) :
+    basis.encode (Function.update registers index (registers index + 1)) =
+      basis.prime index * basis.encode registers := by
+  unfold encode
+  rw [Fintype.prod_eq_mul_prod_compl index, Fintype.prod_eq_mul_prod_compl index]
+  rw [Function.update_self, pow_succ]
+  have unchanged :
+      (∏ other ∈ ({index}ᶜ : Finset (Fin n)), basis.prime other ^
+        Function.update registers index (registers index + 1) other) =
+      ∏ other ∈ ({index}ᶜ : Finset (Fin n)), basis.prime other ^ registers other := by
+    apply Finset.prod_congr rfl
+    intro other present
+    have different : other ≠ index := by simpa using present
+    rw [Function.update_of_ne different]
+  rw [unchanged]
+  ac_rfl
+
+theorem prime_dvd_encode_iff (registers : Fin n → ℕ) (index : Fin n) :
+    basis.prime index ∣ basis.encode registers ↔ registers index ≠ 0 := by
+  rw [(basis.isPrime index).dvd_iff_one_le_factorization (basis.encode_positive registers).ne',
+    basis.factorization_encode]
+  omega
+
+theorem register_zero_iff (registers : Fin n → ℕ) (index : Fin n) :
+    registers index = 0 ↔ ¬ basis.prime index ∣ basis.encode registers := by
+  rw [basis.prime_dvd_encode_iff]
+  omega
+
+theorem remainder_zero_iff (registers : Fin n → ℕ) (index : Fin n) :
+    basis.encode registers % basis.prime index = 0 ↔ registers index ≠ 0 := by
+  rw [← Nat.dvd_iff_mod_eq_zero, basis.prime_dvd_encode_iff]
+
+theorem encode_decrement (registers : Fin n → ℕ) (index : Fin n)
+    (nonzero : registers index ≠ 0) :
+    basis.encode (Function.update registers index (registers index - 1)) =
+      basis.encode registers / basis.prime index := by
+  let previous := Function.update registers index (registers index - 1)
+  have restores : Function.update previous index (previous index + 1) = registers := by
+    funext other
+    by_cases same : other = index
+    · subst other
+      simp only [previous, Function.update_self]
+      omega
+    · simp [previous, same]
+  have restores_code := basis.encode_increment previous index
+  rw [restores] at restores_code
+  change basis.encode previous = basis.encode registers / basis.prime index
+  rw [restores_code, Nat.mul_div_cancel_left _ (basis.isPrime index).pos]
+
+end Basis
+
 /-- A classical proof-side encoding of three source registers, using fixed distinct primes. -/
 def prime (index : Fin 3) : ℕ := if index = 0 then 2 else if index = 1 then 3 else 5
 
@@ -602,71 +693,65 @@ def encode (registers : Fin 3 → ℕ) : ℕ :=
 theorem prime_prime (index : Fin 3) : (prime index).Prime := by
   fin_cases index <;> norm_num [prime] <;> decide
 
+def decode (code : ℕ) : Fin 3 → ℕ := fun index => code.factorization (prime index)
+
+/-- The existing three-register code is the specialization with primes 2, 3 and 5. -/
+def three : Basis 3 where
+  prime := prime
+  isPrime := prime_prime
+  distinct := by
+    intro first second same
+    fin_cases first <;> fin_cases second <;> simp_all [prime]
+
+@[simp] theorem three_prime (index : Fin 3) : three.prime index = prime index := rfl
+
+@[simp] theorem three_decode (code : ℕ) : three.decode code = decode code := rfl
+
+theorem three_encode (registers : Fin 3 → ℕ) : three.encode registers = encode registers := by
+  change (∏ index : Fin 3, prime index ^ registers index) =
+    2 ^ registers 0 * 3 ^ registers 1 * 5 ^ registers 2
+  simp [Fin.prod_univ_succ, prime, mul_assoc]
+
 theorem encode_positive (registers : Fin 3 → ℕ) : 0 < encode registers := by
-  unfold encode
-  positivity
+  simpa only [three_encode] using three.encode_positive registers
 
 /-- Prime valuations recover each source register exactly. -/
 theorem factorization_encode (registers : Fin 3 → ℕ) (index : Fin 3) :
     (encode registers).factorization (prime index) = registers index := by
-  unfold encode
-  rw [Nat.factorization_mul
-      (mul_ne_zero (pow_ne_zero _ (by decide)) (pow_ne_zero _ (by decide)))
-      (pow_ne_zero _ (by decide)),
-    Nat.factorization_mul (pow_ne_zero _ (by decide)) (pow_ne_zero _ (by decide)),
-    (show Nat.Prime 2 by decide).factorization_pow,
-    (show Nat.Prime 3 by decide).factorization_pow,
-    (show Nat.Prime 5 by decide).factorization_pow]
-  fin_cases index <;> simp [prime]
-
-def decode (code : ℕ) : Fin 3 → ℕ := fun index => code.factorization (prime index)
+  simpa only [three_encode, three_prime] using three.factorization_encode registers index
 
 theorem decode_encode : Function.LeftInverse decode encode := by
   intro registers
-  funext index
-  exact factorization_encode registers index
+  simpa only [three_encode, three_decode] using three.decode_encode registers
 
 theorem encode_injective : Function.Injective encode := decode_encode.injective
 
-@[simp] theorem encode_zero : encode (fun _ => 0) = 1 := by simp [encode]
+@[simp] theorem encode_zero : encode (fun _ => 0) = 1 := by
+  simpa only [three_encode] using three.encode_zero
 
 /-- Incrementing a source register multiplies the single code by its fixed prime. -/
 theorem encode_increment (registers : Fin 3 → ℕ) (index : Fin 3) :
     encode (Function.update registers index (registers index + 1)) = prime index * encode registers := by
-  fin_cases index <;> norm_num [encode, prime, Function.update_apply, pow_add] <;> ring
+  simpa only [three_encode, three_prime] using three.encode_increment registers index
 
 /-- Divisibility is precisely the nonzero test for the corresponding source register. -/
 theorem prime_dvd_encode_iff (registers : Fin 3 → ℕ) (index : Fin 3) :
     prime index ∣ encode registers ↔ registers index ≠ 0 := by
-  rw [(prime_prime index).dvd_iff_one_le_factorization (encode_positive registers).ne',
-    factorization_encode]
-  omega
+  simpa only [three_encode, three_prime] using three.prime_dvd_encode_iff registers index
 
 theorem register_zero_iff (registers : Fin 3 → ℕ) (index : Fin 3) :
     registers index = 0 ↔ ¬ prime index ∣ encode registers := by
-  rw [prime_dvd_encode_iff]
-  omega
+  simpa only [three_encode, three_prime] using three.register_zero_iff registers index
 
 theorem remainder_zero_iff (registers : Fin 3 → ℕ) (index : Fin 3) :
     encode registers % prime index = 0 ↔ registers index ≠ 0 := by
-  rw [← Nat.dvd_iff_mod_eq_zero, prime_dvd_encode_iff]
+  simpa only [three_encode, three_prime] using three.remainder_zero_iff registers index
 
 /-- A nonzero source decrement is exact division of the positive code. -/
 theorem encode_decrement (registers : Fin 3 → ℕ) (index : Fin 3)
     (nonzero : registers index ≠ 0) :
     encode (Function.update registers index (registers index - 1)) = encode registers / prime index := by
-  let previous := Function.update registers index (registers index - 1)
-  have restores : Function.update previous index (previous index + 1) = registers := by
-    funext other
-    by_cases same : other = index
-    · subst other
-      simp only [previous, Function.update_self]
-      omega
-    · simp [previous, same]
-  have restores_code := encode_increment previous index
-  rw [restores] at restores_code
-  change encode previous = encode registers / prime index
-  rw [restores_code, Nat.mul_div_cancel_left _ (prime_prime index).pos]
+  simpa only [three_encode, three_prime] using three.encode_decrement registers index nonzero
 
 end Monodromy.PrimeCode
 
@@ -2482,6 +2567,11 @@ def apply : Action n → (Fin n → ℤ) → (Fin n → ℤ)
   | .shift reg amount, values => Function.update values reg (values reg + amount)
   | .test _ _, values => values
 
+/-- The elementary source family required by reversible counter compression. -/
+def UnitShift : Action n → Prop
+  | .shift _ amount => amount = 1 ∨ amount = -1
+  | .test _ _ => True
+
 /-- The only two different alternatives allowed at a common port. -/
 def Compatible : Action n → Action n → Prop
   | .test first firstZero, .test second secondZero => first = second ∧ firstZero ≠ secondZero
@@ -2784,6 +2874,18 @@ def reverseAction : Action n → Action n
     Action.Compatible (reverseAction first) (reverseAction second) ↔
       Action.Compatible first second := by
   cases first <;> cases second <;> rfl
+
+namespace Action
+
+@[simp] theorem unitShift_reverse (action : Action n) :
+    UnitShift (reverseAction action) ↔ UnitShift action := by
+  cases action with
+  | test => rfl
+  | shift register amount =>
+      change (-amount = 1 ∨ -amount = -1) ↔ amount = 1 ∨ amount = -1
+      omega
+
+end Action
 
 def reverseEdge (edge : Edge n q) : Edge n q :=
   ⟨edge.target, edge.source, reverseAction edge.action⟩
@@ -3740,6 +3842,10 @@ def mapAction (register : Fin n → Fin m) : Action n → Action m
   | .shift index amount => .shift (register index) amount
   | .test index atZero => .test (register index) atZero
 
+@[simp] theorem unitShift_mapAction (register : Fin n → Fin m) (action : Action n) :
+    Action.UnitShift (mapAction register action) ↔ Action.UnitShift action := by
+  cases action <;> rfl
+
 def mapTable (register : Fin n → Fin m) (source : Table n q e) : Table m q e :=
   fun edge => ⟨(source edge).source, (source edge).target, mapAction register (source edge).action⟩
 
@@ -4099,7 +4205,280 @@ theorem reaches_compose (first : Table n (q₁ + 1) e₁) (second : Table n q₂
   exact first_trace.trans (reaches_right first second exit entry first_deterministic
     second_deterministic no_outgoing second_run)
 
+/-! Finite traces inside larger control graphs. -/
+
+section FiniteTrace
+
+variable {n m q k e f : ℕ}
+
+/-- Inclusion of the chosen edges preserves live steps; exit edges may be added. -/
+theorem step_map_live (source : Table n q e) (target : Table n k f)
+    (control : Fin q → Fin k) (edge : Fin e → Fin f)
+    (agrees : ∀ index, target (edge index) = mapEdge control (source index))
+    (source_valid : Deterministic source) (target_valid : Deterministic target)
+    {first last : State n q} (transition : step source first = some last) :
+    step target (mapState control first) = some (mapState control last) := by
+  obtain ⟨index, enabled, result⟩ := (step_iff source source_valid).mp transition
+  apply (step_iff target target_valid).mpr
+  refine ⟨edge index, ?_, ?_⟩
+  · rw [agrees]
+    exact ⟨congrArg control enabled.1, enabled.2⟩
+  · rw [agrees]
+    exact congrArg (mapState control) result
+
+/-- Every finite source trace runs inside the target with its full register vector. -/
+theorem reaches_map_live (source : Table n q e) (target : Table n k f)
+    (control : Fin q → Fin k) (edge : Fin e → Fin f)
+    (agrees : ∀ index, target (edge index) = mapEdge control (source index))
+    (source_valid : Deterministic source) (target_valid : Deterministic target)
+    {first last : State n q} (run : StateTransition.Reaches (step source) first last) :
+    StateTransition.Reaches (step target) (mapState control first) (mapState control last) := by
+  exact Relation.ReflTransGen.lift (mapState control)
+    (fun _ _ transition => step_map_live source target control edge agrees
+      source_valid target_valid transition) _ _ run
+
+/-- Register relocation precedes control inclusion and protects all background values. -/
+theorem reaches_embed_map_live (source : Table n q e) (target : Table m k f)
+    (register : Fin n → Fin m) (faithful : Function.Injective register)
+    (background : Fin m → ℤ) (control : Fin q → Fin k) (edge : Fin e → Fin f)
+    (agrees : ∀ index, target (edge index) =
+      mapEdge control (RegisterRelocation.mapTable register source index))
+    (source_valid : Deterministic source) (target_valid : Deterministic target)
+    {first last : State n q} (run : StateTransition.Reaches (step source) first last) :
+    StateTransition.Reaches (step target)
+      (mapState control (RegisterRelocation.embed register background first))
+      (mapState control (RegisterRelocation.embed register background last)) := by
+  exact reaches_map_live (RegisterRelocation.mapTable register source) target control edge agrees
+    (RegisterRelocation.deterministic register faithful source source_valid) target_valid
+    (RegisterRelocation.reaches_embed register faithful background source source_valid run)
+
+end FiniteTrace
+
 end Monodromy.Counter.Reversible.Glue
+
+/-!
+## Finite port identification
+
+A partial matching identifies existing output and input positions. Original
+edges and actions are retained, including in cyclic networks.
+-/
+
+noncomputable section
+
+namespace Monodromy.Counter.Reversible.PortNetwork
+
+variable {n q e : ℕ}
+
+/-- A partial injective matching from exits with no outgoing edge to entries
+with no incoming edge. Destinations are not themselves matched exits. -/
+structure Wiring (original : Table n q e) where
+  link : Fin q → Option (Fin q)
+  terminal : ∀ {exit entry}, link exit = some entry → link entry = none
+  injective : ∀ {first second entry}, link first = some entry →
+    link second = some entry → first = second
+  source_free : ∀ index, link (original index).source = none
+  target_free : ∀ index exit, link exit ≠ some (original index).target
+
+variable {original : Table n q e} (wiring : Wiring original)
+
+/-- Matched exits disappear; their incident targets use the selected entry. -/
+abbrev Node := {position : Fin q // wiring.link position = none}
+
+def representative (position : Fin q) : Node wiring :=
+  match selected : wiring.link position with
+  | none => ⟨position, selected⟩
+  | some entry => ⟨entry, wiring.terminal selected⟩
+
+def size : ℕ := Fintype.card (Node wiring)
+
+def nodeEquiv : Node wiring ≃ Fin (size wiring) := Fintype.equivFin _
+
+def control (position : Fin q) : Fin (size wiring) :=
+  nodeEquiv wiring (representative wiring position)
+
+def table : Table n (size wiring) e := fun index =>
+  Glue.mapEdge (control wiring) (original index)
+
+@[simp] theorem table_source (index : Fin e) :
+    (table wiring index).source = control wiring (original index).source := rfl
+
+@[simp] theorem table_target (index : Fin e) :
+    (table wiring index).target = control wiring (original index).target := rfl
+
+@[simp] theorem table_action (index : Fin e) :
+    (table wiring index).action = (original index).action := rfl
+
+@[simp] theorem representative_unlinked (position : Fin q)
+    (unlinked : wiring.link position = none) :
+    (representative wiring position).val = position := by
+  unfold representative
+  split <;> simp_all
+
+@[simp] theorem representative_linked (exit entry : Fin q)
+    (linked : wiring.link exit = some entry) :
+    (representative wiring exit).val = entry := by
+  unfold representative
+  split <;> simp_all
+
+/-- Retained vertices are already their own representatives. -/
+@[simp] theorem control_on_retained (position : Node wiring) :
+    control wiring position.val = nodeEquiv wiring position := by
+  apply congrArg (nodeEquiv wiring)
+  apply Subtype.ext
+  exact representative_unlinked wiring position.val position.property
+
+/-- A wire is a literal equality of control positions, not a new transition. -/
+theorem interface {exit entry : Fin q} (linked : wiring.link exit = some entry) :
+    control wiring exit = control wiring entry := by
+  apply congrArg (nodeEquiv wiring)
+  apply Subtype.ext
+  rw [representative_linked wiring exit entry linked,
+    representative_unlinked wiring entry (wiring.terminal linked)]
+
+theorem control_unlinked_injective {first second : Fin q}
+    (first_free : wiring.link first = none) (second_free : wiring.link second = none)
+    (same : control wiring first = control wiring second) : first = second := by
+  have representatives := (nodeEquiv wiring).injective same
+  have positions := congrArg Subtype.val representatives
+  simpa only [representative_unlinked wiring first first_free,
+    representative_unlinked wiring second second_free] using positions
+
+/-- Sources are never normalized, so their incidence is preserved exactly. -/
+theorem source_eq_iff (first second : Fin e) :
+    control wiring (original first).source = control wiring (original second).source ↔
+      (original first).source = (original second).source := by
+  constructor
+  · exact control_unlinked_injective wiring (wiring.source_free first) (wiring.source_free second)
+  · exact congrArg (control wiring)
+
+/-- Distinct original targets cannot merge: matched entries have no incoming edge,
+and the exit-to-entry wiring is injective. -/
+theorem target_eq_iff (first second : Fin e) :
+    control wiring (original first).target = control wiring (original second).target ↔
+      (original first).target = (original second).target := by
+  constructor
+  · intro same
+    have positions := congrArg Subtype.val ((nodeEquiv wiring).injective same)
+    cases left : wiring.link (original first).target with
+    | none =>
+      cases right : wiring.link (original second).target with
+      | none => exact control_unlinked_injective wiring left right same
+      | some entry =>
+        have eq_entry : (original first).target = entry := by
+          simpa only [representative_unlinked wiring _ left,
+            representative_linked wiring _ _ right] using positions
+        exact False.elim (wiring.target_free first (original second).target (eq_entry ▸ right))
+    | some entry =>
+      cases right : wiring.link (original second).target with
+      | none =>
+        have eq_entry : entry = (original second).target := by
+          simpa only [representative_linked wiring _ _ left,
+            representative_unlinked wiring _ right] using positions
+        exact False.elim (wiring.target_free second (original first).target (eq_entry ▸ left))
+      | some other =>
+        have entries : entry = other := by
+          simpa only [representative_linked wiring _ _ left,
+            representative_linked wiring _ _ right] using positions
+        exact wiring.injective left (entries ▸ right)
+  · exact congrArg (control wiring)
+
+/-- Gluing preserves the original forward local reversibility condition. -/
+theorem deterministic (valid : Deterministic original) : Deterministic (table wiring) := by
+  intro first second different same
+  exact valid first second different ((source_eq_iff wiring first second).mp same)
+
+/-- Gluing preserves the original backward local reversibility condition. -/
+theorem targetCompatible (valid : TargetCompatible original) : TargetCompatible (table wiring) := by
+  intro first second different same
+  exact valid first second different ((target_eq_iff wiring first second).mp same)
+
+/-- Every original live step remains an actual step of the graph with identified ports. -/
+theorem step_map_live (valid : Deterministic original) {first last : State n q}
+    (transition : step original first = some last) :
+    step (table wiring) (Glue.mapState (control wiring) first) =
+      some (Glue.mapState (control wiring) last) := by
+  exact Glue.step_map_live original (table wiring) (control wiring) id
+    (fun _ => rfl) valid (deterministic wiring valid) transition
+
+/-- Finite runs compose through literal port equalities and preserve all registers. -/
+theorem reaches_map_live (valid : Deterministic original) {first last : State n q}
+    (run : StateTransition.Reaches (step original) first last) :
+    StateTransition.Reaches (step (table wiring))
+      (Glue.mapState (control wiring) first) (Glue.mapState (control wiring) last) := by
+  exact Glue.reaches_map_live original (table wiring) (control wiring) id
+    (fun _ => rfl) valid (deterministic wiring valid) run
+
+/-- A positive run remains positive even when an exit is identified with its own entry. -/
+theorem reaches1_map_live (valid : Deterministic original) {first last : State n q}
+    (run : StateTransition.Reaches₁ (step original) first last) :
+    StateTransition.Reaches₁ (step (table wiring))
+      (Glue.mapState (control wiring) first) (Glue.mapState (control wiring) last) := by
+  exact Relation.TransGen.lift (Glue.mapState (control wiring))
+    (fun _ _ transition => step_map_live wiring valid transition) _ _ run
+
+/-- Bounded selection of an entry from a finite, functional port relation. -/
+def relationLink (connection : Fin q → Fin q → Prop) [DecidableRel connection]
+    (exit : Fin q) : Option (Fin q) :=
+  if connected : ∃ entry, connection exit entry then
+    some (Fin.find (connection exit) connected)
+  else none
+
+theorem relationLink_some_iff (connection : Fin q → Fin q → Prop) [DecidableRel connection]
+    (functional : ∀ {exit first second}, connection exit first →
+      connection exit second → first = second) (exit entry : Fin q) :
+    relationLink connection exit = some entry ↔ connection exit entry := by
+  unfold relationLink
+  split_ifs with connected
+  · rw [Option.some.injEq]
+    constructor
+    · intro same
+      rw [← same]
+      exact Fin.find_spec connected
+    · intro actual
+      exact functional (Fin.find_spec connected) actual
+  · constructor
+    · intro impossible
+      cases impossible
+    · intro actual
+      exact False.elim (connected ⟨entry, actual⟩)
+
+theorem relationLink_none_iff (connection : Fin q → Fin q → Prop) [DecidableRel connection]
+    (exit : Fin q) :
+    relationLink connection exit = none ↔ ∀ entry, ¬ connection exit entry := by
+  unfold relationLink
+  split_ifs with connected
+  · constructor
+    · intro impossible
+      cases impossible
+    · intro absent
+      exact False.elim (absent _ (Fin.find_spec connected))
+  · exact ⟨fun _ entry actual => connected ⟨entry, actual⟩, fun _ => rfl⟩
+
+/-- A partial matching of existing exits and entries supplies static wiring. -/
+def Wiring.ofRelation (original : Table n q e)
+    (connection : Fin q → Fin q → Prop) [DecidableRel connection]
+    (functional : ∀ {exit first second}, connection exit first →
+      connection exit second → first = second)
+    (backward : ∀ {first second entry}, connection first entry →
+      connection second entry → first = second)
+    (terminal : ∀ {exit entry}, connection exit entry → ∀ next, ¬ connection entry next)
+    (source_free : ∀ index entry, ¬ connection (original index).source entry)
+    (target_free : ∀ index exit, ¬ connection exit (original index).target) :
+    Wiring original where
+  link := relationLink connection
+  terminal := fun linked => (relationLink_none_iff connection _).mpr
+    (terminal ((relationLink_some_iff connection functional _ _).mp linked))
+  injective := fun first second => backward
+    ((relationLink_some_iff connection functional _ _).mp first)
+    ((relationLink_some_iff connection functional _ _).mp second)
+  source_free := fun index => (relationLink_none_iff connection _).mpr (source_free index)
+  target_free := fun index exit linked => target_free index exit
+    ((relationLink_some_iff connection functional _ _).mp linked)
+
+end Monodromy.Counter.Reversible.PortNetwork
+
+end
+
 
 /-!
 ## One reversible radix graph: unpacking and packing
@@ -4214,6 +4593,14 @@ def table : Table 2 (size p) (edges p) := fun index =>
       ⟨nodeEquiv p (origin p arc), nodeEquiv p (destination p arc), operation p arc⟩ := by
   simp [table]
 
+theorem unitShift (index : Fin (edges p)) : Action.UnitShift (table p index).action := by
+  obtain ⟨arc, rfl⟩ := (arcEquiv p).surjective index
+  rw [table_arc]
+  change Action.UnitShift (operation p arc)
+  rcases arc with position | ⟨remainder, phase⟩
+  · fin_cases position <;> simp [operation, Action.UnitShift]
+  · fin_cases phase <;> simp [operation, Action.UnitShift]
+
 theorem deterministic : Deterministic (table p) := by
   intro first second different same_source
   obtain ⟨first, rfl⟩ := (arcEquiv p).surjective first
@@ -4285,6 +4672,25 @@ theorem valid_step {first last : State 2 (size p)}
       origin, destination, operation]
   all_goals try omega
   all_goals unfold next; split_ifs <;> simp_all <;> omega
+
+/-- The existing finite-port invariant is stable under the actual reversed graph. -/
+theorem valid_reverse_step {first last : State 2 (size p)}
+    (valid : Valid p first) (transition : step (reverseTable (table p)) first = some last) :
+    Valid p last := by
+  obtain ⟨index, enabled, rfl⟩ :=
+    (step_iff _ (reverseTable_deterministic _ (targetCompatible p))).mp transition
+  obtain ⟨arc, rfl⟩ := (arcEquiv p).surjective index
+  rcases first with ⟨position, values⟩
+  have position_eq : nodeEquiv p (destination p arc) = position := by
+    simpa only [reverseTable, reverseEdge, table_arc, Edge.enabled] using enabled.1
+  subst position
+  have action_enabled : (reverseAction (operation p arc)).enabled values := by
+    simpa only [reverseTable, reverseEdge, table_arc] using enabled.2
+  clear enabled
+  rcases arc with index | ⟨remainder, index⟩ <;> fin_cases index <;>
+    simp_all [Valid, admissible, reverseTable, reverseEdge, table_arc, Edge.execute,
+      reverseAction, Action.apply, Action.enabled, origin, destination, operation]
+  all_goals try omega
 
 omit [NeZero p] in
 theorem origin_ne_finish (arc : Arc p) (remainder : Fin p) :
@@ -4566,6 +4972,336 @@ theorem native_reverse_pack (quotient : ℕ) (remainder : Fin p) :
 end Monodromy.Counter.Reversible.Radix
 
 /-!
+## Read-only remainder observation by identified radix ports
+-/
+
+noncomputable section
+
+namespace Monodromy.Counter.Reversible.RadixObservation
+
+variable (p m : ℕ) [NeZero p]
+
+abbrev RawNode := (Fin 2 × Fin m) × Fin (Radix.size p)
+abbrev RawArc := (Fin 2 × Fin m) × Fin (Radix.edges p)
+
+def rawSize : ℕ := (2 * m) * Radix.size p
+def edges : ℕ := (2 * m) * Radix.edges p
+
+def rawNodeEquiv : RawNode p m ≃ Fin (rawSize p m) :=
+  (Equiv.prodCongr finProdFinEquiv (Equiv.refl _)).trans finProdFinEquiv
+
+def arcEquiv : RawArc p m ≃ Fin (edges p m) :=
+  (Equiv.prodCongr finProdFinEquiv (Equiv.refl _)).trans finProdFinEquiv
+
+def rawControl (direction : Fin 2) (row : Fin m) (position : Fin (Radix.size p)) :
+    Fin (rawSize p m) := rawNodeEquiv p m ((direction, row), position)
+
+def component (direction : Fin 2) : Table 2 (Radix.size p) (Radix.edges p) :=
+  if direction = 0 then Radix.table p else reverseTable (Radix.table p)
+
+private theorem component_deterministic (direction : Fin 2) : Deterministic (component p direction) := by
+  unfold component
+  split_ifs
+  · exact Radix.deterministic p
+  · exact reverseTable_deterministic _ (Radix.targetCompatible p)
+
+private theorem component_targetCompatible (direction : Fin 2) :
+    TargetCompatible (component p direction) := by
+  unfold component
+  split_ifs
+  · exact Radix.targetCompatible p
+  · exact reverseTable_targetCompatible _ (Radix.deterministic p)
+
+def rawTable : Table 2 (rawSize p m) (edges p m) := fun index =>
+  let arc := (arcEquiv p m).symm index
+  Glue.mapEdge (rawControl p m arc.1.1 arc.1.2) (component p arc.1.1 arc.2)
+
+@[simp] theorem rawTable_arc (owner : Fin 2 × Fin m) (index : Fin (Radix.edges p)) :
+    rawTable p m (arcEquiv p m (owner, index)) =
+      Glue.mapEdge (rawControl p m owner.1 owner.2) (component p owner.1 index) := by
+  simp only [rawTable, Equiv.symm_apply_apply]
+
+omit [NeZero p] in
+private theorem rawControl_eq_iff (first second : Fin 2 × Fin m)
+    (initial final : Fin (Radix.size p)) :
+    rawControl p m first.1 first.2 initial = rawControl p m second.1 second.2 final ↔
+      first = second ∧ initial = final := by
+  change rawNodeEquiv p m (first, initial) = rawNodeEquiv p m (second, final) ↔ _
+  rw [(rawNodeEquiv p m).injective.eq_iff, Prod.mk.injEq]
+
+private theorem raw_deterministic : Deterministic (rawTable p m) := by
+  intro first second different same
+  obtain ⟨⟨owner, first⟩, rfl⟩ := (arcEquiv p m).surjective first
+  obtain ⟨⟨other, second⟩, rfl⟩ := (arcEquiv p m).surjective second
+  simp only [rawTable_arc, Glue.mapEdge] at same ⊢
+  have ports := (rawControl_eq_iff p m owner other _ _).mp same
+  rcases ports with ⟨rfl, positions⟩
+  exact component_deterministic p owner.1 first second
+    (fun equal => different (by subst second; rfl)) positions
+
+private theorem raw_targetCompatible : TargetCompatible (rawTable p m) := by
+  intro first second different same
+  obtain ⟨⟨owner, first⟩, rfl⟩ := (arcEquiv p m).surjective first
+  obtain ⟨⟨other, second⟩, rfl⟩ := (arcEquiv p m).surjective second
+  simp only [rawTable_arc, Glue.mapEdge] at same ⊢
+  have ports := (rawControl_eq_iff p m owner other _ _).mp same
+  rcases ports with ⟨rfl, positions⟩
+  exact component_targetCompatible p owner.1 first second
+    (fun equal => different (by subst second; rfl)) positions
+
+/-- A finite node address exposes whether it is a radix finish port. -/
+def finishQuery (position : Fin (Radix.size p)) : Option (Fin p) :=
+  match (Radix.nodeEquiv p).symm position with
+  | .inl _ => none
+  | .inr (remainder, phase) => if phase = 7 then some remainder else none
+
+omit [NeZero p] in
+@[simp] theorem finishQuery_finish (remainder : Fin p) :
+    finishQuery p (Radix.finish p remainder) = some remainder := by
+  simp [finishQuery, Radix.finish, Radix.block]
+
+omit [NeZero p] in
+theorem finishQuery_some {position : Fin (Radix.size p)} {remainder : Fin p}
+    (selected : finishQuery p position = some remainder) : position = Radix.finish p remainder := by
+  unfold finishQuery at selected
+  cases shape : (Radix.nodeEquiv p).symm position with
+  | inl global => simp [shape] at selected
+  | inr pair =>
+    rcases pair with ⟨symbol, phase⟩
+    rw [shape] at selected
+    dsimp only at selected
+    split_ifs at selected with last
+    · have symbols := Option.some.inj selected
+      subst symbol
+      apply (Radix.nodeEquiv p).symm.injective
+      simp only [Radix.finish, Radix.block, Equiv.symm_apply_apply, shape, last]
+
+private theorem finishQuery_source (index : Fin (Radix.edges p)) :
+    finishQuery p (Radix.table p index).source = none := by
+  cases selected : finishQuery p (Radix.table p index).source with
+  | none => rfl
+  | some remainder =>
+    exact (Radix.no_outgoing_finish p remainder ⟨index, finishQuery_some p selected⟩).elim
+
+/-- Only forward finish ports are matched, directly to the corresponding reversed copy. -/
+def link (permutation : Fin p → Equiv.Perm (Fin m)) (position : Fin (rawSize p m)) :
+    Option (Fin (rawSize p m)) :=
+  let node := (rawNodeEquiv p m).symm position
+  if node.1.1 = 0 then
+    (finishQuery p node.2).map fun remainder => rawControl p m 1 (permutation remainder node.1.2) node.2
+  else none
+
+omit [NeZero p] in
+@[simp] theorem link_backward (permutation : Fin p → Equiv.Perm (Fin m))
+    (row : Fin m) (position : Fin (Radix.size p)) :
+    link p m permutation (rawControl p m 1 row position) = none := by
+  simp [link, rawControl]
+
+omit [NeZero p] in
+@[simp] theorem link_finish (permutation : Fin p → Equiv.Perm (Fin m))
+    (row : Fin m) (remainder : Fin p) :
+    link p m permutation (rawControl p m 0 row (Radix.finish p remainder)) =
+      some (rawControl p m 1 (permutation remainder row) (Radix.finish p remainder)) := by
+  simp [link, rawControl]
+
+omit [NeZero p] in
+/-- Every link is a finish-port equality; its remainder is an address in a fixed finite table. -/
+theorem link_some (permutation : Fin p → Equiv.Perm (Fin m))
+    {exit entry : Fin (rawSize p m)} (linked : link p m permutation exit = some entry) :
+    ∃ row remainder, exit = rawControl p m 0 row (Radix.finish p remainder) ∧
+      entry = rawControl p m 1 (permutation remainder row) (Radix.finish p remainder) := by
+  obtain ⟨⟨⟨direction, row⟩, position⟩, rfl⟩ := (rawNodeEquiv p m).surjective exit
+  change link p m permutation (rawControl p m direction row position) = some entry at linked
+  simp only [link, rawControl, Equiv.symm_apply_apply] at linked
+  split_ifs at linked with forward
+  · cases selected : finishQuery p position with
+    | none => simp [selected] at linked
+    | some remainder =>
+      simp only [selected, Option.map_some] at linked
+      have target : rawControl p m 1 (permutation remainder row) position = entry :=
+        Option.some.inj linked
+      have position_eq := finishQuery_some p selected
+      exact ⟨row, remainder, by simp only [forward, position_eq, rawControl],
+        by simpa only [position_eq] using target.symm⟩
+
+/-- Finite wiring is the only new data; the two existing edge families are unchanged. -/
+def wiring (permutation : Fin p → Equiv.Perm (Fin m)) : PortNetwork.Wiring (rawTable p m) where
+  link := link p m permutation
+  terminal := by
+    intro exit entry linked
+    obtain ⟨row, remainder, rfl, rfl⟩ := link_some p m permutation linked
+    exact link_backward p m permutation _ _
+  injective := by
+    intro first second entry left right
+    obtain ⟨row, remainder, rfl, equal_left⟩ := link_some p m permutation left
+    obtain ⟨other, symbol, rfl, equal_right⟩ := link_some p m permutation right
+    have ports := (rawControl_eq_iff p m (1, permutation remainder row)
+      (1, permutation symbol other) _ _).mp (equal_left.symm.trans equal_right)
+    have symbols : remainder = symbol := by
+      apply Fin.ext
+      have raw := (Radix.nodeEquiv p).injective ports.2
+      exact congrArg (fun node : Radix.Node p => node.elim (fun _ => 0) (fun pair => pair.1.val)) raw
+    subst symbol
+    have rows := (permutation remainder).injective (congrArg Prod.snd ports.1)
+    rw [rows]
+  source_free := by
+    intro index
+    obtain ⟨⟨⟨direction, row⟩, index⟩, rfl⟩ := (arcEquiv p m).surjective index
+    fin_cases direction <;> simp [rawTable_arc, Glue.mapEdge, component, link, rawControl, finishQuery_source]
+  target_free := by
+    intro index exit linked
+    obtain ⟨row, remainder, _, equal⟩ := link_some p m permutation linked
+    obtain ⟨⟨⟨direction, other⟩, index⟩, rfl⟩ := (arcEquiv p m).surjective index
+    fin_cases direction
+    · simp only [rawTable_arc, Glue.mapEdge] at equal
+      change rawControl p m 0 other (Radix.table p index).target =
+        rawControl p m 1 (permutation remainder row) (Radix.finish p remainder) at equal
+      have impossible : ((0 : Fin 2), other) = (1, permutation remainder row) :=
+        ((rawControl_eq_iff p m (0, other) (1, permutation remainder row) _ _).mp equal).1
+      exact (by simpa using congrArg Prod.fst impossible)
+    · simp only [rawTable_arc, Glue.mapEdge] at equal
+      change rawControl p m 1 other (Radix.table p index).source =
+        rawControl p m 1 (permutation remainder row) (Radix.finish p remainder) at equal
+      have ports := (rawControl_eq_iff p m (1, other) (1, permutation remainder row) _ _).mp equal
+      exact Radix.no_outgoing_finish p remainder ⟨index, ports.2⟩
+
+def size (permutation : Fin p → Equiv.Perm (Fin m)) : ℕ := PortNetwork.size (wiring p m permutation)
+
+def table (permutation : Fin p → Equiv.Perm (Fin m)) : Table 2 (size p m permutation) (edges p m) :=
+  PortNetwork.table (wiring p m permutation)
+
+def front (permutation : Fin p → Equiv.Perm (Fin m)) (row : Fin m)
+    (position : Fin (Radix.size p)) : Fin (size p m permutation) :=
+  PortNetwork.control (wiring p m permutation) (rawControl p m 0 row position)
+
+def back (permutation : Fin p → Equiv.Perm (Fin m)) (row : Fin m)
+    (position : Fin (Radix.size p)) : Fin (size p m permutation) :=
+  PortNetwork.control (wiring p m permutation) (rawControl p m 1 row position)
+
+theorem deterministic (permutation : Fin p → Equiv.Perm (Fin m)) : Deterministic (table p m permutation) :=
+  PortNetwork.deterministic _ (raw_deterministic p m)
+
+theorem targetCompatible (permutation : Fin p → Equiv.Perm (Fin m)) : TargetCompatible (table p m permutation) :=
+  PortNetwork.targetCompatible _ (raw_targetCompatible p m)
+
+theorem front_finish (permutation : Fin p → Equiv.Perm (Fin m)) (row : Fin m) (remainder : Fin p) :
+    front p m permutation row (Radix.finish p remainder) =
+      back p m permutation (permutation remainder row) (Radix.finish p remainder) :=
+  PortNetwork.interface _ (link_finish p m permutation row remainder)
+
+@[simp] theorem table_front (permutation : Fin p → Equiv.Perm (Fin m))
+    (row : Fin m) (index : Fin (Radix.edges p)) :
+    table p m permutation (arcEquiv p m ((0, row), index)) =
+      Glue.mapEdge (front p m permutation row) (Radix.table p index) := by
+  change Glue.mapEdge (PortNetwork.control (wiring p m permutation))
+    (rawTable p m (arcEquiv p m ((0, row), index))) = _
+  rw [rawTable_arc]
+  simp only [component, ite_true]
+  rfl
+
+@[simp] theorem table_back (permutation : Fin p → Equiv.Perm (Fin m))
+    (row : Fin m) (index : Fin (Radix.edges p)) :
+    table p m permutation (arcEquiv p m ((1, row), index)) =
+      Glue.mapEdge (back p m permutation row) (reverseTable (Radix.table p) index) := by
+  change Glue.mapEdge (PortNetwork.control (wiring p m permutation))
+    (rawTable p m (arcEquiv p m ((1, row), index))) = _
+  rw [rawTable_arc]
+  simp only [component, Fin.isValue, Fin.reduceEq, ite_false]
+  rfl
+
+def inputPort (permutation : Fin p → Equiv.Perm (Fin m)) (row : Fin m) :
+    Fin (size p m permutation) := front p m permutation row (Radix.entry p)
+
+def outputPort (permutation : Fin p → Equiv.Perm (Fin m)) (row : Fin m) :
+    Fin (size p m permutation) := back p m permutation row (Radix.entry p)
+
+def point (permutation : Fin p → Equiv.Perm (Fin m)) (position : Fin (size p m permutation))
+    (left right : ℤ) : State 2 (size p m permutation) := (position, ![left, right])
+
+instance [NeZero m] (permutation : Fin p → Equiv.Perm (Fin m)) : NeZero (size p m permutation) := by
+  change NeZero (Fintype.card (PortNetwork.Node (wiring p m permutation)))
+  exact ⟨Nat.ne_of_gt (Fintype.card_pos_iff.mpr
+    ⟨PortNetwork.representative (wiring p m permutation) (rawControl p m 1 0 (Radix.entry p))⟩)⟩
+
+/-- Output boundaries retain their absence of outgoing edges after port identification. -/
+theorem no_outgoing_output (permutation : Fin p → Equiv.Perm (Fin m)) (row : Fin m) :
+    ¬ ∃ index, (table p m permutation index).source = outputPort p m permutation row := by
+  rintro ⟨index, same⟩
+  have raw_equal := PortNetwork.control_unlinked_injective (wiring p m permutation)
+    ((wiring p m permutation).source_free index)
+    (link_backward p m permutation row (Radix.entry p)) same
+  obtain ⟨⟨owner, index⟩, rfl⟩ := (arcEquiv p m).surjective index
+  simp only [rawTable_arc, Glue.mapEdge] at raw_equal
+  have ports := (rawControl_eq_iff p m owner (1, row) _ _).mp raw_equal
+  rcases ports with ⟨rfl, position⟩
+  exact Radix.no_incoming_entry p index
+    (by simpa only [component, Fin.isValue, Fin.reduceEq, ite_false, reverseTable, reverseEdge] using position)
+
+/-- The actual remainder port selects a reversed copy, which restores both counter values. -/
+theorem reaches_result (permutation : Fin p → Equiv.Perm (Fin m)) (row : Fin m) (value : ℕ) :
+    StateTransition.Reaches (step (table p m permutation))
+      (point p m permutation (inputPort p m permutation row) value 0)
+      (point p m permutation (outputPort p m permutation (permutation (Counter.DivMod.residue p value) row)) value 0) := by
+  have forward := Glue.reaches_map_live (Radix.table p) (table p m permutation)
+    (front p m permutation row) (fun index => arcEquiv p m ((0, row), index))
+    (fun index => table_front p m permutation row index)
+    (Radix.deterministic p) (deterministic p m permutation) (Radix.reaches_result p value)
+  have backward := Glue.reaches_map_live (reverseTable (Radix.table p)) (table p m permutation)
+    (back p m permutation (permutation (Counter.DivMod.residue p value) row))
+    (fun index => arcEquiv p m ((1, permutation (Counter.DivMod.residue p value) row), index))
+    (fun index => table_back p m permutation _ index)
+    (reverseTable_deterministic _ (Radix.targetCompatible p)) (deterministic p m permutation)
+    (Radix.reverse_pack p (value / p) (Counter.DivMod.residue p value))
+  change StateTransition.Reaches (step (table p m permutation))
+    (point p m permutation (inputPort p m permutation row) value 0)
+    (point p m permutation (front p m permutation row (Radix.finish p (Counter.DivMod.residue p value)))
+      (value / p : ℕ) 0) at forward
+  rw [front_finish] at forward
+  change StateTransition.Reaches (step (table p m permutation))
+    (point p m permutation (back p m permutation (permutation (Counter.DivMod.residue p value) row)
+      (Radix.finish p (Counter.DivMod.residue p value))) (value / p : ℕ) 0)
+    (point p m permutation (outputPort p m permutation (permutation (Counter.DivMod.residue p value) row))
+      (p * (value / p) + (Counter.DivMod.residue p value).val : ℕ) 0) at backward
+  have restore : p * (value / p) + (Counter.DivMod.residue p value).val = value := by
+    simpa only [Counter.DivMod.residue, Nat.add_comm] using Nat.mod_add_div value p
+  rw [restore] at backward
+  exact forward.trans backward
+
+theorem halt_output (permutation : Fin p → Equiv.Perm (Fin m)) (row : Fin m)
+    (values : Fin 2 → ℤ) : step (table p m permutation) (outputPort p m permutation row, values) = none := by
+  rw [step_none_iff]
+  rintro ⟨index, enabled⟩
+  exact no_outgoing_output p m permutation row ⟨index, enabled.1⟩
+
+/-- Complete execution changes finite control and restores the full two-counter memory. -/
+theorem eval_result (permutation : Fin p → Equiv.Perm (Fin m)) (row : Fin m) (value : ℕ) :
+    eval (table p m permutation) (point p m permutation (inputPort p m permutation row) value 0) =
+      Part.some (point p m permutation
+        (outputPort p m permutation (permutation (Counter.DivMod.residue p value) row)) value 0) := by
+  apply Part.eq_some_iff.mpr
+  exact StateTransition.mem_eval.mpr
+    ⟨reaches_result p m permutation row value, halt_output p m permutation _ _⟩
+
+/-- The existing five-gate compiler realizes the same port network on three persistent roots. -/
+theorem native_eval [NeZero m] (permutation : Fin p → Equiv.Perm (Fin m))
+    (row : Fin m) (value : ℕ) :
+    (ReversibleCompilation.haltingProgram (table p m permutation)
+      (deterministic p m permutation) (targetCompatible p m permutation)).eval
+      (ReversibleCompilation.iota (e := edges p m)
+        (point p m permutation (inputPort p m permutation row) value 0)) =
+      Part.some (ReversibleCompilation.iota (e := edges p m)
+        (point p m permutation
+          (outputPort p m permutation (permutation (Counter.DivMod.residue p value) row)) value 0)) := by
+  apply ReversibleCompilation.eval_of_reaches
+  · exact reaches_result p m permutation row value
+  · exact no_outgoing_output p m permutation _
+
+end Monodromy.Counter.Reversible.RadixObservation
+
+end
+
+
+/-!
 ## A source specification for reversible transition recording
 -/
 
@@ -4710,53 +5446,3197 @@ theorem eval_projection (program : Program n m) (state : State n m) :
 
 end Monodromy.Counter.Recorded
 
+
 /-!
-## Finite traces inside larger control graphs
+## Recoverable execution histories
+
+Finite copies of the reversed radix graph record each instruction branch.
+The source registers are protected while the history is packed; the workspace
+returns to zero at every dispatch. This is an intermediate reversible source
+graph, prior to compression into the two native memory coordinates.
 -/
 
-namespace Monodromy.Counter.Reversible.Glue
+noncomputable section
 
-variable {n m q k e f : ℕ}
+namespace Monodromy.Counter.Reversible.Recording
 
-/-- Inclusion of the chosen edges preserves live steps; exit edges may be added. -/
-theorem step_map_live (source : Table n q e) (target : Table n k f)
-    (control : Fin q → Fin k) (edge : Fin e → Fin f)
-    (agrees : ∀ index, target (edge index) = mapEdge control (source index))
-    (source_valid : Deterministic source) (target_valid : Deterministic target)
-    {first last : State n q} (transition : step source first = some last) :
-    step target (mapState control first) = some (mapState control last) := by
-  obtain ⟨index, enabled, result⟩ := (step_iff source source_valid).mp transition
-  apply (step_iff target target_valid).mpr
-  refine ⟨edge index, ?_, ?_⟩
-  · rw [agrees]
-    exact ⟨congrArg control enabled.1, enabled.2⟩
-  · rw [agrees]
-    exact congrArg (mapState control) result
+variable {n m : ℕ}
 
-/-- Every finite source trace runs inside the target with its full register vector. -/
-theorem reaches_map_live (source : Table n q e) (target : Table n k f)
-    (control : Fin q → Fin k) (edge : Fin e → Fin f)
-    (agrees : ∀ index, target (edge index) = mapEdge control (source index))
-    (source_valid : Deterministic source) (target_valid : Deterministic target)
-    {first last : State n q} (run : StateTransition.Reaches (step source) first last) :
-    StateTransition.Reaches (step target) (mapState control first) (mapState control last) := by
-  exact Relation.ReflTransGen.lift (mapState control)
-    (fun _ _ transition => step_map_live source target control edge agrees
-      source_valid target_valid transition) _ _ run
+def base (m : ℕ) : ℕ := m * 2 + 1
 
-/-- Register relocation precedes control inclusion and protects all background values. -/
-theorem reaches_embed_map_live (source : Table n q e) (target : Table m k f)
-    (register : Fin n → Fin m) (faithful : Function.Injective register)
-    (background : Fin m → ℤ) (control : Fin q → Fin k) (edge : Fin e → Fin f)
-    (agrees : ∀ index, target (edge index) =
-      mapEdge control (RegisterRelocation.mapTable register source index))
-    (source_valid : Deterministic source) (target_valid : Deterministic target)
-    {first last : State n q} (run : StateTransition.Reaches (step source) first last) :
-    StateTransition.Reaches (step target)
-      (mapState control (RegisterRelocation.embed register background first))
-      (mapState control (RegisterRelocation.embed register background last)) := by
-  exact reaches_map_live (RegisterRelocation.mapTable register source) target control edge agrees
-    (RegisterRelocation.deterministic register faithful source source_valid) target_valid
-    (RegisterRelocation.reaches_embed register faithful background source source_valid run)
+instance base_nonzero (m : ℕ) : NeZero (base m) := ⟨by simp [base]⟩
 
-end Monodromy.Counter.Reversible.Glue
+abbrev Node (m : ℕ) := (Fin m × Fin (Radix.size (base m))) ⊕ Fin m
+
+def size (m : ℕ) : ℕ := m * Radix.size (base m) + m
+
+def nodeEquiv (m : ℕ) : Node m ≃ Fin (size m) :=
+  (Equiv.sumCongr finProdFinEquiv (Equiv.refl _)).trans finSumFinEquiv
+
+def copy (row : Fin m) (position : Fin (Radix.size (base m))) : Fin (size m) :=
+  nodeEquiv m (.inl (row, position))
+
+def mid (row : Fin m) : Fin (size m) := nodeEquiv m (.inr row)
+
+def dispatch (row : Fin m) : Fin (size m) := copy row (Radix.entry (base m))
+
+def port (row : Fin m) (symbol : Fin (base m)) : Fin (size m) :=
+  copy row (Radix.finish (base m) symbol)
+
+/-- The nonzero digit retains the old address and decrement branch. -/
+def digit (row : Fin m) (branch : Fin 2) : Fin (base m) :=
+  ⟨(finProdFinEquiv (row, branch)).val + 1, by
+    have bound := (finProdFinEquiv (row, branch)).isLt
+    simp only [base]
+    omega⟩
+
+@[simp] theorem digit_eq_iff (row other : Fin m) (branch next : Fin 2) :
+    digit row branch = digit other next ↔ row = other ∧ branch = next := by
+  constructor
+  · intro same
+    have values := congrArg Fin.val same
+    have tags : finProdFinEquiv (row, branch) = finProdFinEquiv (other, next) := by
+      apply Fin.ext
+      simp only [digit] at values
+      omega
+    exact Prod.mk.inj ((finProdFinEquiv).injective tags)
+  · rintro ⟨rfl, rfl⟩
+    rfl
+
+/-- Precisely the active finite external arcs; halt rows contribute none. -/
+def Active (program : Counter.Program n m) (pair : Fin m × Fin 3) : Prop :=
+  match program pair.1 with
+  | .inc _ _ => pair.2 = 0
+  | .dec _ _ _ => True
+  | .halt => False
+
+instance active_decidable (program : Counter.Program n m) (pair : Fin m × Fin 3) :
+    Decidable (Active program pair) := by
+  unfold Active
+  cases program pair.1 <;> infer_instance
+
+abbrev Extra (program : Counter.Program n m) := {pair : Fin m × Fin 3 // Active program pair}
+
+def historyRegister (n : ℕ) : Fin 2 → Fin (n + 2) := Fin.natAdd n
+
+theorem historyRegister_injective (n : ℕ) : Function.Injective (historyRegister n) := by
+  intro first second same
+  apply Fin.ext
+  have values := congrArg Fin.val same
+  simp only [historyRegister, Fin.val_natAdd] at values
+  omega
+
+def packing (n m : ℕ) : Table (n + 2) (Radix.size (base m)) (Radix.edges (base m)) :=
+  RegisterRelocation.mapTable (historyRegister n) (reverseTable (Radix.table (base m)))
+
+theorem packing_deterministic (n m : ℕ) : Deterministic (packing n m) :=
+  RegisterRelocation.deterministic _ (historyRegister_injective n) _
+    (reverseTable_deterministic _ (Radix.targetCompatible (base m)))
+
+theorem packing_targetCompatible (n m : ℕ) : TargetCompatible (packing n m) :=
+  RegisterRelocation.targetCompatible _ (historyRegister_injective n) _
+    (reverseTable_targetCompatible _ (Radix.deterministic (base m)))
+
+theorem packing_no_outgoing_dispatch (index : Fin (Radix.edges (base m))) :
+    (packing n m index).source ≠ Radix.entry (base m) :=
+  Radix.no_incoming_entry (base m) index
+
+theorem packing_no_incoming_port (symbol : Fin (base m))
+    (index : Fin (Radix.edges (base m))) :
+    (packing n m index).target ≠ Radix.finish (base m) symbol :=
+  fun incoming => Radix.no_outgoing_finish (base m) symbol ⟨index, incoming⟩
+
+def extraOrigin (program : Counter.Program n m) (arc : Extra program) : Node m :=
+  match instruction : program arc.val.1 with
+  | .inc _ _ => .inl (arc.val.1, Radix.entry (base m))
+  | .dec _ _ _ => if arc.val.2 = 2 then .inr arc.val.1
+      else .inl (arc.val.1, Radix.entry (base m))
+  | .halt => False.elim (by simpa [Active, instruction] using arc.property)
+
+def extraDestination (program : Counter.Program n m) (arc : Extra program) : Node m :=
+  match instruction : program arc.val.1 with
+  | .inc _ target => .inl (target, Radix.finish (base m) (digit arc.val.1 0))
+  | .dec _ zero nonzero => ![
+      Sum.inl (zero, Radix.finish (base m) (digit arc.val.1 0)),
+      Sum.inr arc.val.1,
+      Sum.inl (nonzero, Radix.finish (base m) (digit arc.val.1 1))] arc.val.2
+  | .halt => False.elim (by simpa [Active, instruction] using arc.property)
+
+def extraOperation (program : Counter.Program n m) (arc : Extra program) : Action (n + 2) :=
+  match instruction : program arc.val.1 with
+  | .inc register _ => .shift (Fin.castAdd 2 register) 1
+  | .dec register _ _ => ![
+      Action.test (Fin.castAdd 2 register) true,
+      Action.test (Fin.castAdd 2 register) false,
+      Action.shift (Fin.castAdd 2 register) (-1)] arc.val.2
+  | .halt => False.elim (by simpa [Active, instruction] using arc.property)
+
+def extraEdge (program : Counter.Program n m) (arc : Extra program) : Edge (n + 2) (size m) :=
+  ⟨nodeEquiv m (extraOrigin program arc), nodeEquiv m (extraDestination program arc),
+    extraOperation program arc⟩
+
+abbrev Arc (program : Counter.Program n m) :=
+  (Fin m × Fin (Radix.edges (base m))) ⊕ Extra program
+
+def edges (program : Counter.Program n m) : ℕ :=
+  m * Radix.edges (base m) + Fintype.card (Extra program)
+
+def arcEquiv (program : Counter.Program n m) : Arc program ≃ Fin (edges program) :=
+  (Equiv.sumCongr finProdFinEquiv (Fintype.equivFin (Extra program))).trans finSumFinEquiv
+
+def arcEdge (program : Counter.Program n m) : Arc program → Edge (n + 2) (size m)
+  | .inl (row, edge) => Glue.mapEdge (copy row) (packing n m edge)
+  | .inr edge => extraEdge program edge
+
+def table (program : Counter.Program n m) : Table (n + 2) (size m) (edges program) :=
+  fun index => arcEdge program ((arcEquiv program).symm index)
+
+@[simp] theorem table_arc (program : Counter.Program n m) (arc : Arc program) :
+    table program (arcEquiv program arc) = arcEdge program arc := by
+  simp [table]
+
+/-- Every copy preserves its own finite radix address and original-row label. -/
+@[simp] theorem copy_eq_iff (row other : Fin m)
+    (first second : Fin (Radix.size (base m))) :
+    copy row first = copy other second ↔ row = other ∧ first = second := by
+  unfold copy
+  rw [(nodeEquiv m).injective.eq_iff]
+  simp
+
+@[simp] theorem copy_ne_mid (row other : Fin m) (position : Fin (Radix.size (base m))) :
+    copy row position ≠ mid other := by
+  intro same
+  have impossible : (Sum.inl (row, position) : Node m) = Sum.inr other :=
+    (nodeEquiv m).injective same
+  cases impossible
+
+@[simp] theorem mid_eq_iff (row other : Fin m) : mid row = mid other ↔ row = other := by
+  unfold mid
+  rw [(nodeEquiv m).injective.eq_iff]
+  simp
+
+@[simp] theorem finish_eq_iff (first second : Fin (base m)) :
+    Radix.finish (base m) first = Radix.finish (base m) second ↔ first = second := by
+  unfold Radix.finish Radix.block
+  rw [(Radix.nodeEquiv (base m)).injective.eq_iff]
+  simp
+
+
+theorem extraOrigin_inc (program : Counter.Program n m) (arc : Extra program)
+    (register : Fin n) (target : Fin m) (instruction : program arc.val.1 = .inc register target) :
+    extraOrigin program arc = Sum.inl (arc.val.1, Radix.entry (base m)) := by
+  unfold extraOrigin
+  split <;> simp_all
+
+theorem extraOrigin_dec (program : Counter.Program n m) (arc : Extra program)
+    (register : Fin n) (zero nonzero : Fin m)
+    (instruction : program arc.val.1 = .dec register zero nonzero) :
+    extraOrigin program arc = if arc.val.2 = 2 then Sum.inr arc.val.1
+      else Sum.inl (arc.val.1, Radix.entry (base m)) := by
+  unfold extraOrigin
+  split <;> simp_all
+
+theorem extraDestination_inc (program : Counter.Program n m) (arc : Extra program)
+    (register : Fin n) (target : Fin m) (instruction : program arc.val.1 = .inc register target) :
+    extraDestination program arc =
+      Sum.inl (target, Radix.finish (base m) (digit arc.val.1 0)) := by
+  unfold extraDestination
+  split <;> simp_all
+
+theorem extraDestination_dec (program : Counter.Program n m) (arc : Extra program)
+    (register : Fin n) (zero nonzero : Fin m)
+    (instruction : program arc.val.1 = .dec register zero nonzero) :
+    extraDestination program arc = ![
+      Sum.inl (zero, Radix.finish (base m) (digit arc.val.1 0)),
+      Sum.inr arc.val.1,
+      Sum.inl (nonzero, Radix.finish (base m) (digit arc.val.1 1))] arc.val.2 := by
+  unfold extraDestination
+  split <;> simp_all
+
+theorem extraOperation_inc (program : Counter.Program n m) (arc : Extra program)
+    (register : Fin n) (target : Fin m) (instruction : program arc.val.1 = .inc register target) :
+    extraOperation program arc = .shift (Fin.castAdd 2 register) 1 := by
+  unfold extraOperation
+  split <;> simp_all
+
+theorem extraOperation_dec (program : Counter.Program n m) (arc : Extra program)
+    (register : Fin n) (zero nonzero : Fin m)
+    (instruction : program arc.val.1 = .dec register zero nonzero) :
+    extraOperation program arc = ![
+      Action.test (Fin.castAdd 2 register) true,
+      Action.test (Fin.castAdd 2 register) false,
+      Action.shift (Fin.castAdd 2 register) (-1)] arc.val.2 := by
+  unfold extraOperation
+  split <;> simp_all
+
+private theorem extraOrigin_row (program : Counter.Program n m) (arc : Extra program) :
+    (extraOrigin program arc).elim Prod.fst id = arc.val.1 := by
+  cases instruction : program arc.val.1 with
+  | inc register target =>
+      rw [extraOrigin_inc program arc register target instruction]
+      rfl
+  | dec register zero nonzero =>
+      rw [extraOrigin_dec program arc register zero nonzero instruction]
+      split_ifs <;> rfl
+  | halt =>
+      have active := arc.property
+      unfold Active at active
+      rw [instruction] at active
+      exact active.elim
+
+/-- The only external dispatch alternatives are complementary tests on the same old register. -/
+theorem extra_deterministic (program : Counter.Program n m) (first second : Extra program)
+    (different : first ≠ second) (same : extraOrigin program first = extraOrigin program second) :
+    Action.Compatible (extraOperation program first) (extraOperation program second) := by
+  have rows : first.val.1 = second.val.1 := by
+    have owners := congrArg (fun node : Node m => node.elim Prod.fst id) same
+    simpa only [extraOrigin_row] using owners
+  rcases first with ⟨⟨row, branch⟩, first_active⟩
+  rcases second with ⟨⟨other, next⟩, second_active⟩
+  change row = other at rows
+  subst other
+  cases instruction : program row with
+  | inc register target =>
+      have first_zero : branch = 0 := by
+        have active := first_active
+        unfold Active at active
+        rw [instruction] at active
+        exact active
+      have second_zero : next = 0 := by
+        have active := second_active
+        unfold Active at active
+        rw [instruction] at active
+        exact active
+      subst branch
+      subst next
+      exact False.elim (different (Subtype.ext rfl))
+  | dec register zero nonzero =>
+      rw [extraOrigin_dec program ⟨(row, branch), first_active⟩ register zero nonzero instruction,
+        extraOrigin_dec program ⟨(row, next), second_active⟩ register zero nonzero instruction] at same
+      rw [extraOperation_dec program ⟨(row, branch), first_active⟩ register zero nonzero instruction,
+        extraOperation_dec program ⟨(row, next), second_active⟩ register zero nonzero instruction]
+      fin_cases branch <;> fin_cases next <;> simp_all [Action.Compatible]
+  | halt =>
+      have active := first_active
+      unfold Active at active
+      rw [instruction] at active
+      exact active.elim
+
+/-- A nonzero history digit makes every external destination distinct. -/
+theorem extraDestination_injective (program : Counter.Program n m) :
+    Function.Injective (extraDestination program) := by
+  intro first second same
+  rcases first with ⟨⟨row, branch⟩, first_active⟩
+  rcases second with ⟨⟨other, next⟩, second_active⟩
+  apply Subtype.ext
+  cases first_instruction : program row <;> cases second_instruction : program other
+  all_goals
+    have first_valid := first_active
+    have second_valid := second_active
+    unfold Active at first_valid second_valid
+    rw [first_instruction] at first_valid
+    rw [second_instruction] at second_valid
+  all_goals try contradiction
+  all_goals first
+    | rw [extraDestination_inc program ⟨(row, branch), first_active⟩ _ _ first_instruction] at same
+    | rw [extraDestination_dec program ⟨(row, branch), first_active⟩ _ _ _ first_instruction] at same
+  all_goals first
+    | rw [extraDestination_inc program ⟨(other, next), second_active⟩ _ _ second_instruction] at same
+    | rw [extraDestination_dec program ⟨(other, next), second_active⟩ _ _ _ second_instruction] at same
+  all_goals fin_cases branch <;> fin_cases next <;> simp_all
+
+private theorem extraOrigin_shape (program : Counter.Program n m) (arc : Extra program) :
+    extraOrigin program arc = Sum.inl (arc.val.1, Radix.entry (base m)) ∨
+      extraOrigin program arc = Sum.inr arc.val.1 := by
+  cases instruction : program arc.val.1 with
+  | inc register target => exact Or.inl (extraOrigin_inc program arc register target instruction)
+  | dec register zero nonzero =>
+      rw [extraOrigin_dec program arc register zero nonzero instruction]
+      by_cases last : arc.val.2 = 2 <;> simp [last]
+  | halt =>
+      have active := arc.property
+      unfold Active at active
+      rw [instruction] at active
+      exact active.elim
+
+private theorem extraDestination_shape (program : Counter.Program n m) (arc : Extra program) :
+    (∃ target symbol, extraDestination program arc =
+      Sum.inl (target, Radix.finish (base m) symbol)) ∨
+      extraDestination program arc = Sum.inr arc.val.1 := by
+  rcases arc with ⟨⟨row, branch⟩, active⟩
+  cases instruction : program row with
+  | inc register target =>
+      exact Or.inl ⟨target, digit row 0, extraDestination_inc program _ register target instruction⟩
+  | dec register zero nonzero =>
+      rw [extraDestination_dec program _ register zero nonzero instruction]
+      fin_cases branch
+      · exact Or.inl ⟨zero, digit row 0, rfl⟩
+      · exact Or.inr rfl
+      · exact Or.inl ⟨nonzero, digit row 1, rfl⟩
+  | halt =>
+      have impossible := active
+      unfold Active at impossible
+      rw [instruction] at impossible
+      exact impossible.elim
+
+private theorem packing_extra_source_ne (program : Counter.Program n m) (row : Fin m)
+    (index : Fin (Radix.edges (base m))) (arc : Extra program) :
+    copy row (packing n m index).source ≠ nodeEquiv m (extraOrigin program arc) := by
+  intro same
+  have raw : Sum.inl (row, (packing n m index).source) = extraOrigin program arc :=
+    (nodeEquiv m).injective same
+  rcases extraOrigin_shape program arc with dispatch_case | mid_case
+  · rw [dispatch_case] at raw
+    exact packing_no_outgoing_dispatch (n := n) index (Prod.mk.inj (Sum.inl.inj raw)).2
+  · rw [mid_case] at raw
+    cases raw
+
+private theorem packing_extra_target_ne (program : Counter.Program n m) (row : Fin m)
+    (index : Fin (Radix.edges (base m))) (arc : Extra program) :
+    copy row (packing n m index).target ≠ nodeEquiv m (extraDestination program arc) := by
+  intro same
+  have raw : Sum.inl (row, (packing n m index).target) = extraDestination program arc :=
+    (nodeEquiv m).injective same
+  rcases extraDestination_shape program arc with ⟨target, symbol, port_case⟩ | mid_case
+  · rw [port_case] at raw
+    exact packing_no_incoming_port (n := n) symbol index (Prod.mk.inj (Sum.inl.inj raw)).2
+  · rw [mid_case] at raw
+    cases raw
+
+/-- The compiled graph chooses every enabled edge through its own finite ports. -/
+theorem deterministic (program : Counter.Program n m) : Deterministic (table program) := by
+  intro first second different same
+  obtain ⟨first, rfl⟩ := (arcEquiv program).surjective first
+  obtain ⟨second, rfl⟩ := (arcEquiv program).surjective second
+  have distinct : first ≠ second := fun identical => different (congrArg (arcEquiv program) identical)
+  clear different
+  simp only [table_arc] at same ⊢
+  rcases first with ⟨row, index⟩ | first <;> rcases second with ⟨other, next⟩ | second
+  all_goals simp only [arcEdge, Glue.mapEdge, extraEdge] at same ⊢
+  · rcases (copy_eq_iff row other _ _).mp same with ⟨same_rows, same_source⟩
+    subst other
+    exact packing_deterministic n m index next
+      (fun identical => distinct (congrArg Sum.inl (Prod.ext rfl identical))) same_source
+  · exact False.elim (packing_extra_source_ne program row index second same)
+  · exact False.elim (packing_extra_source_ne program other next first same.symm)
+  · exact extra_deterministic program first second
+      (fun identical => distinct (congrArg Sum.inr identical)) ((nodeEquiv m).injective same)
+
+/-- A unique recoverable history tag separates every external predecessor. -/
+theorem targetCompatible (program : Counter.Program n m) : TargetCompatible (table program) := by
+  intro first second different same
+  obtain ⟨first, rfl⟩ := (arcEquiv program).surjective first
+  obtain ⟨second, rfl⟩ := (arcEquiv program).surjective second
+  have distinct : first ≠ second := fun identical => different (congrArg (arcEquiv program) identical)
+  clear different
+  simp only [table_arc] at same ⊢
+  rcases first with ⟨row, index⟩ | first <;> rcases second with ⟨other, next⟩ | second
+  all_goals simp only [arcEdge, Glue.mapEdge, extraEdge] at same ⊢
+  · rcases (copy_eq_iff row other _ _).mp same with ⟨same_rows, same_target⟩
+    subst other
+    exact packing_targetCompatible n m index next
+      (fun identical => distinct (congrArg Sum.inl (Prod.ext rfl identical))) same_target
+  · exact False.elim (packing_extra_target_ne program row index second same)
+  · exact False.elim (packing_extra_target_ne program other next first same.symm)
+  · exact False.elim (distinct (congrArg Sum.inr
+      (extraDestination_injective program ((nodeEquiv m).injective same))))
+
+
+def frame (values : Fin n → ℕ) (history workspace : ℤ) : Fin (n + 2) → ℤ :=
+  Fin.addCases (fun index => (values index : ℤ)) ![history, workspace]
+
+def framed (control : Fin (size m)) (values : Fin n → ℕ) (history workspace : ℤ) :
+    State (n + 2) (size m) := (control, frame values history workspace)
+
+def encode (state : Counter.Configuration n m) (history : ℕ) : State (n + 2) (size m) :=
+  framed (dispatch state.pc) state.counters history 0
+
+@[simp] theorem frame_old (values : Fin n → ℕ) (history workspace : ℤ) (index : Fin n) :
+    frame values history workspace (Fin.castAdd 2 index) = (values index : ℤ) := by
+  simp [frame]
+
+@[simp] theorem frame_tail (values : Fin n → ℕ) (history workspace : ℤ) (index : Fin 2) :
+    frame values history workspace (historyRegister n index) = ![history, workspace] index := by
+  simp [frame, historyRegister]
+
+@[simp] theorem frame_history (values : Fin n → ℕ) (history workspace : ℤ) :
+    frame values history workspace (historyRegister n 0) = history := by simp
+
+@[simp] theorem frame_workspace (values : Fin n → ℕ) (history workspace : ℤ) :
+    frame values history workspace (historyRegister n 1) = workspace := by simp
+
+private theorem tail_ne_old (index : Fin 2) (old : Fin n) :
+    historyRegister n index ≠ Fin.castAdd 2 old := by
+  intro same
+  have values := congrArg Fin.val same
+  simp only [historyRegister, Fin.val_natAdd, Fin.val_castAdd] at values
+  omega
+
+theorem frame_extend (values : Fin n → ℕ) (history workspace : ℤ) :
+    Function.extend (historyRegister n) ![history, workspace] (frame values 0 0) =
+      frame values history workspace := by
+  funext index
+  induction index using Fin.addCases with
+  | left old =>
+      rw [Function.extend_apply' _ _ _ (by rintro ⟨tail, same⟩; exact tail_ne_old tail old same)]
+      simp
+  | right tail =>
+      change Function.extend (historyRegister n) ![history, workspace] (frame values 0 0)
+        (historyRegister n tail) = frame values history workspace (historyRegister n tail)
+      rw [(historyRegister_injective n).extend_apply]
+      exact (frame_tail values history workspace tail).symm
+
+theorem framed_embed (control : Fin (size m)) (values : Fin n → ℕ) (history workspace : ℤ) :
+    RegisterRelocation.embed (historyRegister n) (frame values 0 0)
+      (control, ![history, workspace]) = framed control values history workspace := by
+  simp only [RegisterRelocation.embed, framed, frame_extend]
+
+theorem frame_update (values : Fin n → ℕ) (history workspace : ℤ) (index : Fin n) (value : ℕ) :
+    Function.update (frame values history workspace) (Fin.castAdd 2 index) (value : ℤ) =
+      frame (Function.update values index value) history workspace := by
+  funext position
+  induction position using Fin.addCases with
+  | left old =>
+      by_cases same : old = index
+      · subst old; simp
+      · simp [same]
+  | right tail =>
+      change Function.update (frame values history workspace) (Fin.castAdd 2 index) (value : ℤ)
+        (historyRegister n tail) =
+          frame (Function.update values index value) history workspace (historyRegister n tail)
+      rw [Function.update_of_ne (tail_ne_old tail index)]
+      simp only [frame_tail]
+
+theorem shift_frame (values : Fin n → ℕ) (history workspace amount : ℤ) (index : Fin n)
+    (value : ℕ) (updated : (values index : ℤ) + amount = value) :
+    Action.apply (.shift (Fin.castAdd 2 index) amount) (frame values history workspace) =
+      frame (Function.update values index value) history workspace := by
+  simpa only [Action.apply, frame_old, updated] using frame_update values history workspace index value
+
+theorem inc_frame (values : Fin n → ℕ) (history workspace : ℤ) (index : Fin n) :
+    Action.apply (.shift (Fin.castAdd 2 index) 1) (frame values history workspace) =
+      frame (Function.update values index (values index + 1)) history workspace :=
+  shift_frame values history workspace 1 index _ (by simp)
+
+theorem dec_frame (values : Fin n → ℕ) (history workspace : ℤ) (index : Fin n) (value : ℕ)
+    (positive : values index = value + 1) :
+    Action.apply (.shift (Fin.castAdd 2 index) (-1)) (frame values history workspace) =
+      frame (Function.update values index value) history workspace :=
+  shift_frame values history workspace (-1) index _ (by simp [positive])
+
+
+def embed (recorded : Counter.Recorded.State n m) : State (n + 2) (size m) :=
+  encode recorded.1 recorded.2
+
+theorem embed_injective : Function.Injective (@embed n m) := by
+  rintro ⟨⟨first_pc, first_values⟩, first_history⟩
+    ⟨⟨second_pc, second_values⟩, second_history⟩ same
+  change framed (dispatch first_pc) first_values first_history 0 =
+    framed (dispatch second_pc) second_values second_history 0 at same
+  apply Prod.ext
+  · apply congrArg₂ Counter.Configuration.mk
+    · have controls := congrArg (fun state : State (n + 2) (size m) => state.1) same
+      exact ((copy_eq_iff first_pc second_pc _ _).mp controls).1
+    · funext index
+      have values := congrArg
+        (fun state : State (n + 2) (size m) => state.2 (Fin.castAdd 2 index)) same
+      exact Int.natCast_inj.mp (by simpa only [framed, frame_old] using values)
+  · have histories := congrArg
+      (fun state : State (n + 2) (size m) => state.2 (historyRegister n 0)) same
+    exact Int.natCast_inj.mp (by simpa only [framed, frame_history] using histories)
+
+theorem halt_no_outgoing (program : Counter.Program n m) (row : Fin m)
+    (halted : program row = .halt) (index : Fin (edges program)) :
+    (table program index).source ≠ dispatch row := by
+  obtain ⟨arc, rfl⟩ := (arcEquiv program).surjective index
+  rw [table_arc]
+  rcases arc with ⟨other, edge⟩ | arc
+  · change copy other (packing n m edge).source ≠ copy row (Radix.entry (base m))
+    exact fun same => packing_no_outgoing_dispatch edge ((copy_eq_iff other row _ _).mp same).2
+  · intro same
+    have raw : extraOrigin program arc = Sum.inl (row, Radix.entry (base m)) :=
+      (nodeEquiv m).injective same
+    rcases arc with ⟨⟨other, branch⟩, active⟩
+    cases instruction : program other with
+    | inc register target =>
+        rw [extraOrigin_inc program ⟨(other, branch), active⟩ register target instruction] at raw
+        have rows := (Prod.mk.inj (Sum.inl.inj raw)).1
+        have impossible := instruction.symm.trans ((congrArg program rows).trans halted)
+        cases impossible
+    | dec register zero nonzero =>
+        rw [extraOrigin_dec program ⟨(other, branch), active⟩ register zero nonzero instruction] at raw
+        split at raw
+        · cases raw
+        · have rows := (Prod.mk.inj (Sum.inl.inj raw)).1
+          have impossible := instruction.symm.trans ((congrArg program rows).trans halted)
+          cases impossible
+    | halt =>
+        unfold Active at active
+        rw [instruction] at active
+        exact active.elim
+
+theorem step_encode_none_iff (program : Counter.Program n m)
+    (state : Counter.Configuration n m) (history : ℕ) :
+    step (table program) (encode state history) = none ↔ Counter.step program state = none := by
+  rw [step_none_iff]
+  cases instruction : program state.pc with
+  | halt =>
+      constructor
+      · intro _; exact Counter.step_halt program state instruction
+      · intro _
+        rintro ⟨index, enabled⟩
+        exact halt_no_outgoing program state.pc instruction index enabled.1
+  | inc register target =>
+      simp only [Counter.step, instruction, reduceCtorEq, iff_false, not_not]
+      let arc : Extra program := ⟨(state.pc, 0), by simp [Active, instruction]⟩
+      refine ⟨arcEquiv program (.inr arc), ?_⟩
+      rw [table_arc]
+      change (extraEdge program arc).enabled (encode state history)
+      simp only [extraEdge, Edge.enabled, encode, framed]
+      rw [extraOrigin_inc program arc register target instruction,
+        extraOperation_inc program arc register target instruction]
+      exact ⟨rfl, trivial⟩
+  | dec register zero nonzero =>
+      have live : Counter.step program state ≠ none := by
+        cases count : state.counters register <;> simp [Counter.step, instruction, count]
+      simp only [live, iff_false, not_not]
+      by_cases empty : state.counters register = 0
+      · let arc : Extra program := ⟨(state.pc, 0), by simp [Active, instruction]⟩
+        refine ⟨arcEquiv program (.inr arc), ?_⟩
+        rw [table_arc]
+        change (extraEdge program arc).enabled (encode state history)
+        simp only [extraEdge, Edge.enabled, encode, framed]
+        rw [extraOrigin_dec program arc register zero nonzero instruction,
+          extraOperation_dec program arc register zero nonzero instruction]
+        exact ⟨rfl, by simp [Action.enabled, arc, empty]⟩
+      · let arc : Extra program := ⟨(state.pc, 1), by simp [Active, instruction]⟩
+        refine ⟨arcEquiv program (.inr arc), ?_⟩
+        rw [table_arc]
+        change (extraEdge program arc).enabled (encode state history)
+        simp only [extraEdge, Edge.enabled, encode, framed]
+        rw [extraOrigin_dec program arc register zero nonzero instruction,
+          extraOperation_dec program arc register zero nonzero instruction]
+        exact ⟨rfl, by simp [Action.enabled, arc, empty]⟩
+
+
+theorem extraEdge_inc (program : Counter.Program n m) (arc : Extra program)
+    (register : Fin n) (target : Fin m) (instruction : program arc.val.1 = .inc register target) :
+    extraEdge program arc =
+      ⟨dispatch arc.val.1, port target (digit arc.val.1 0), .shift (Fin.castAdd 2 register) 1⟩ := by
+  unfold extraEdge
+  rw [extraOrigin_inc program arc register target instruction,
+    extraDestination_inc program arc register target instruction,
+    extraOperation_inc program arc register target instruction]
+  rfl
+
+theorem extraEdge_dec (program : Counter.Program n m) (arc : Extra program)
+    (register : Fin n) (zero nonzero : Fin m)
+    (instruction : program arc.val.1 = .dec register zero nonzero) :
+    extraEdge program arc = ![
+      ⟨dispatch arc.val.1, port zero (digit arc.val.1 0), .test (Fin.castAdd 2 register) true⟩,
+      ⟨dispatch arc.val.1, mid arc.val.1, .test (Fin.castAdd 2 register) false⟩,
+      ⟨mid arc.val.1, port nonzero (digit arc.val.1 1), .shift (Fin.castAdd 2 register) (-1)⟩]
+      arc.val.2 := by
+  unfold extraEdge
+  rw [extraOrigin_dec program arc register zero nonzero instruction,
+    extraDestination_dec program arc register zero nonzero instruction,
+    extraOperation_dec program arc register zero nonzero instruction]
+  rcases arc with ⟨⟨row, branch⟩, active⟩
+  fin_cases branch <;> rfl
+
+
+/-! The natural domain is preserved at every intermediate port. -/
+
+def OldNonnegative (values : Fin (n + 2) → ℤ) : Prop :=
+  ∀ index : Fin n, 0 ≤ values (Fin.castAdd 2 index)
+
+/-- Copy ports use the existing radix invariant; the decrement middle retains its positive input. -/
+def admissible (program : Counter.Program n m) : Node m → (Fin (n + 2) → ℤ) → Prop
+  | .inl (_, position), values =>
+      Radix.Valid (base m) (position, values ∘ historyRegister n)
+  | .inr row, values =>
+      0 ≤ values (historyRegister n 0) ∧ values (historyRegister n 1) = 0 ∧
+      match program row with
+      | .dec register _ _ => 0 < values (Fin.castAdd 2 register)
+      | _ => False
+
+def Valid (program : Counter.Program n m) (state : State (n + 2) (size m)) : Prop :=
+  OldNonnegative state.2 ∧ admissible program ((nodeEquiv m).symm state.1) state.2
+
+@[simp] theorem valid_copy_iff (program : Counter.Program n m) (row : Fin m)
+    (position : Fin (Radix.size (base m))) (values : Fin (n + 2) → ℤ) :
+    Valid program (copy row position, values) ↔
+      OldNonnegative values ∧ Radix.Valid (base m) (position, values ∘ historyRegister n) := by
+  simp only [Valid, copy, Equiv.symm_apply_apply, admissible]
+
+@[simp] theorem valid_mid_iff (program : Counter.Program n m) (row : Fin m)
+    (values : Fin (n + 2) → ℤ) :
+    Valid program (mid row, values) ↔
+      OldNonnegative values ∧ 0 ≤ values (historyRegister n 0) ∧
+        values (historyRegister n 1) = 0 ∧
+        match program row with
+        | .dec register _ _ => 0 < values (Fin.castAdd 2 register)
+        | _ => False := by
+  simp only [Valid, mid, Equiv.symm_apply_apply, admissible]
+
+@[simp] theorem valid_dispatch_iff (program : Counter.Program n m) (row : Fin m)
+    (values : Fin (n + 2) → ℤ) :
+    Valid program (dispatch row, values) ↔
+      OldNonnegative values ∧ 0 ≤ values (historyRegister n 0) ∧
+        values (historyRegister n 1) = 0 := by
+  change Valid program (copy row (Radix.entry (base m)), values) ↔ _
+  rw [valid_copy_iff]
+  simp only [Radix.Valid, Radix.entry, Radix.global, Equiv.symm_apply_apply,
+    Radix.admissible, Function.comp_apply, Matrix.cons_val_zero]
+  constructor
+  · rintro ⟨old, history, _, empty⟩
+    exact ⟨old, history, empty⟩
+  · rintro ⟨old, history, empty⟩
+    exact ⟨old, history, by omega, empty⟩
+
+@[simp] theorem valid_port_iff (program : Counter.Program n m) (row : Fin m)
+    (symbol : Fin (base m)) (values : Fin (n + 2) → ℤ) :
+    Valid program (port row symbol, values) ↔
+      OldNonnegative values ∧ 0 ≤ values (historyRegister n 0) ∧
+        0 ≤ values (historyRegister n 1) := by
+  change Valid program (copy row (Radix.finish (base m) symbol), values) ↔ _
+  rw [valid_copy_iff]
+  simp [Radix.Valid, Radix.finish, Radix.block, Radix.admissible]
+
+theorem valid_encode (program : Counter.Program n m) (state : Counter.Configuration n m)
+    (history : ℕ) : Valid program (encode state history) := by
+  change Valid program (dispatch state.pc, frame state.counters history 0)
+  rw [valid_dispatch_iff]
+  refine ⟨?_, ?_, ?_⟩
+  · intro index
+    simpa only [frame_old] using Int.natCast_nonneg (state.counters index)
+  · simpa only [frame_history] using Int.natCast_nonneg history
+  · exact frame_workspace _ _ _
+
+/-- The invariant certifies every physical source counter, including history and workspace. -/
+theorem valid_nonnegative (program : Counter.Program n m) (state : State (n + 2) (size m))
+    (valid : Valid program state) (index : Fin (n + 2)) : 0 ≤ state.2 index := by
+  induction index using Fin.addCases with
+  | left old => exact valid.1 old
+  | right tail =>
+      change 0 ≤ state.2 (historyRegister n tail)
+      rcases state with ⟨position, values⟩
+      obtain ⟨node, rfl⟩ := (nodeEquiv m).surjective position
+      rcases node with ⟨row, position⟩ | row
+      · have tail_valid := ((valid_copy_iff program row position values).mp valid).2
+        fin_cases tail
+        · exact tail_valid.1
+        · exact tail_valid.2.1
+      · have tail_valid := (valid_mid_iff program row values).mp valid
+        fin_cases tail
+        · exact tail_valid.2.1
+        · change 0 ≤ values (historyRegister n 1)
+          rw [tail_valid.2.2.1]
+
+
+private theorem old_nonnegative_mapped (action : Action 2) (values : Fin (n + 2) → ℤ)
+    (old : OldNonnegative values) :
+    OldNonnegative ((RegisterRelocation.mapAction (historyRegister n) action).apply values) := by
+  intro index
+  rw [RegisterRelocation.apply_outside (historyRegister n) action values (Fin.castAdd 2 index)
+    (fun tail => tail_ne_old tail index)]
+  exact old index
+
+private theorem old_nonnegative_shift (register : Fin n) (amount : ℤ)
+    (values : Fin (n + 2) → ℤ) (old : OldNonnegative values)
+    (safe : 0 ≤ values (Fin.castAdd 2 register) + amount) :
+    OldNonnegative (Action.apply (.shift (Fin.castAdd 2 register) amount) values) := by
+  intro index
+  by_cases selected : index = register
+  · subst index
+    simpa only [Action.apply, Function.update_self] using safe
+  · simpa [Action.apply, selected] using old index
+
+private theorem shift_old_tail (register : Fin n) (amount : ℤ)
+    (values : Fin (n + 2) → ℤ) (tail : Fin 2) :
+    Action.apply (.shift (Fin.castAdd 2 register) amount) values (historyRegister n tail) =
+      values (historyRegister n tail) :=
+  Function.update_of_ne (tail_ne_old tail register) _ _
+
+private theorem valid_port_shift (program : Counter.Program n m) (row : Fin m)
+    (symbol : Fin (base m)) (values : Fin (n + 2) → ℤ) (register : Fin n) (amount : ℤ)
+    (old : OldNonnegative values) (safe : 0 ≤ values (Fin.castAdd 2 register) + amount)
+    (history : 0 ≤ values (historyRegister n 0)) (workspace : 0 ≤ values (historyRegister n 1)) :
+    Valid program (port row symbol, Action.apply (.shift (Fin.castAdd 2 register) amount) values) := by
+  rw [valid_port_iff]
+  exact ⟨old_nonnegative_shift register amount values old safe,
+    by rw [shift_old_tail]; exact history,
+    by rw [shift_old_tail]; exact workspace⟩
+
+private theorem packing_valid_edge (program : Counter.Program n m) (row : Fin m)
+    (index : Fin (Radix.edges (base m))) (values : Fin (n + 2) → ℤ)
+    (valid : Valid program (copy row (packing n m index).source, values))
+    (enabled : (packing n m index).action.enabled values) :
+    Valid program (copy row (packing n m index).target, (packing n m index).action.apply values) := by
+  rcases (valid_copy_iff program row _ values).mp valid with ⟨old, radix_valid⟩
+  let original := reverseTable (Radix.table (base m)) index
+  have guard : original.action.enabled (values ∘ historyRegister n) :=
+    (RegisterRelocation.enabled_project (historyRegister n) original.action values).mp enabled
+  have transition : step (reverseTable (Radix.table (base m)))
+      (original.source, values ∘ historyRegister n) =
+      some (original.target, original.action.apply (values ∘ historyRegister n)) := by
+    apply (step_iff _ (reverseTable_deterministic _ (Radix.targetCompatible (base m)))).mpr
+    exact ⟨index, ⟨rfl, guard⟩, rfl⟩
+  have result := Radix.valid_reverse_step (base m) radix_valid transition
+  rw [valid_copy_iff]
+  refine ⟨old_nonnegative_mapped original.action values old, ?_⟩
+  change Radix.Valid (base m)
+    (original.target, (RegisterRelocation.mapAction (historyRegister n) original.action).apply values ∘
+      historyRegister n)
+  rw [RegisterRelocation.apply_project (historyRegister n) (historyRegister_injective n)]
+  exact result
+
+private theorem extra_valid_edge (program : Counter.Program n m) (arc : Extra program)
+    (values : Fin (n + 2) → ℤ) (valid : Valid program ((extraEdge program arc).source, values))
+    (enabled : (extraEdge program arc).action.enabled values) :
+    Valid program ((extraEdge program arc).target, (extraEdge program arc).action.apply values) := by
+  cases instruction : program arc.val.1 with
+  | inc register target =>
+      rw [extraEdge_inc program arc register target instruction] at valid enabled ⊢
+      rcases (valid_dispatch_iff program arc.val.1 values).mp valid with ⟨old, history, empty⟩
+      apply valid_port_shift program target (digit arc.val.1 0) values register 1 old
+      · have nonnegative := old register
+        omega
+      · exact history
+      · omega
+  | dec register zero nonzero =>
+      rw [extraEdge_dec program arc register zero nonzero instruction] at valid enabled ⊢
+      rcases arc with ⟨⟨row, branch⟩, active⟩
+      fin_cases branch
+      · rcases (valid_dispatch_iff program row values).mp valid with ⟨old, history, empty⟩
+        change Valid program (port zero (digit row 0), values)
+        rw [valid_port_iff]
+        exact ⟨old, history, by omega⟩
+      · rcases (valid_dispatch_iff program row values).mp valid with ⟨old, history, empty⟩
+        change Valid program (mid row, values)
+        rw [valid_mid_iff, instruction]
+        refine ⟨old, history, empty, ?_⟩
+        change Action.enabled (.test (Fin.castAdd 2 register) false) values at enabled
+        have not_zero : values (Fin.castAdd 2 register) ≠ 0 := by
+          simpa only [Action.enabled, Bool.false_eq_true, iff_false] using enabled
+        have nonnegative := old register
+        omega
+      · rcases (valid_mid_iff program row values).mp valid with ⟨old, history, empty, selected⟩
+        have positive : 0 < values (Fin.castAdd 2 register) := by
+          simpa only [instruction] using selected
+        apply valid_port_shift program nonzero (digit row 1) values register (-1) old
+        · omega
+        · exact history
+        · omega
+  | halt =>
+      have active := arc.property
+      unfold Active at active
+      rw [instruction] at active
+      exact active.elim
+
+/-- All actual recording transitions preserve the natural counter domain at intermediate ports. -/
+theorem valid_step (program : Counter.Program n m) {first last : State (n + 2) (size m)}
+    (valid : Valid program first) (transition : step (table program) first = some last) :
+    Valid program last := by
+  obtain ⟨index, enabled, rfl⟩ := (step_iff _ (deterministic program)).mp transition
+  obtain ⟨arc, rfl⟩ := (arcEquiv program).surjective index
+  rcases first with ⟨position, values⟩
+  have position_eq : (arcEdge program arc).source = position := by
+    simpa only [table_arc] using enabled.1
+  subst position
+  have action_enabled : (arcEdge program arc).action.enabled values := by
+    simpa only [table_arc] using enabled.2
+  clear enabled
+  simp only [table_arc, Edge.execute]
+  rcases arc with ⟨row, index⟩ | arc
+  · exact packing_valid_edge program row index values valid action_enabled
+  · exact extra_valid_edge program arc values valid action_enabled
+
+theorem stable (program : Counter.Program n m) : Stable (table program) (Valid program) :=
+  fun {_ _} valid transition => valid_step program valid transition
+
+theorem valid_reaches (program : Counter.Program n m) {first last : State (n + 2) (size m)}
+    (valid : Valid program first) (run : StateTransition.Reaches (step (table program)) first last) :
+    Valid program last := by
+  induction run with
+  | refl => exact valid
+  | tail _ transition previous => exact valid_step program previous transition
+
+/-- Every intermediate state of every encoded recording run has only nonnegative counters. -/
+theorem encode_reaches_nonnegative (program : Counter.Program n m)
+    (initial : Counter.Configuration n m) (history : ℕ) {state : State (n + 2) (size m)}
+    (run : StateTransition.Reaches (step (table program)) (encode initial history) state)
+    (index : Fin (n + 2)) : 0 ≤ state.2 index :=
+  valid_nonnegative program state (valid_reaches program (valid_encode program initial history) run) index
+
+/-- A finite-control observation, independent of every counter value. -/
+def Boundary (state : State (n + 2) (size m)) : Prop :=
+  ∃ row : Fin m, state.1 = dispatch row
+
+def InternalStep (program : Counter.Program n m)
+    (first last : State (n + 2) (size m)) : Prop :=
+  step (table program) first = some last ∧ ¬ Boundary first
+
+abbrev InternalReaches (program : Counter.Program n m) :=
+  Relation.ReflTransGen (InternalStep program)
+
+/-- A positive run whose intermediate source states avoid all old dispatches. -/
+def FirstReturn (program : Counter.Program n m)
+    (first last : State (n + 2) (size m)) : Prop :=
+  Boundary first ∧ Boundary last ∧
+    ∃ next, step (table program) first = some next ∧ InternalReaches program next last
+
+theorem boundary_encode (state : Counter.Configuration n m) (history : ℕ) :
+    Boundary (encode state history) := ⟨state.pc, rfl⟩
+
+theorem not_boundary_copy (row : Fin m) (position : Fin (Radix.size (base m)))
+    (interior : position ≠ Radix.entry (base m)) (values : Fin (n + 2) → ℤ) :
+    ¬ Boundary (copy row position, values) := by
+  rintro ⟨other, same⟩
+  exact interior ((copy_eq_iff row other _ _).mp same).2
+
+theorem not_boundary_mid (row : Fin m) (values : Fin n → ℕ) (history workspace : ℤ) :
+    ¬ Boundary (framed (mid row) values history workspace) := by
+  rintro ⟨other, same⟩
+  exact copy_ne_mid other row (Radix.entry (base m)) same.symm
+
+private theorem local_step_not_entry {first last : State 2 (Radix.size (base m))}
+    (transition : step (reverseTable (Radix.table (base m))) first = some last) :
+    first.1 ≠ Radix.entry (base m) := by
+  intro at_entry
+  obtain ⟨index, enabled, _⟩ := (step_iff _
+    (reverseTable_deterministic _ (Radix.targetCompatible (base m)))).mp transition
+  exact Radix.no_incoming_entry (base m) index (enabled.1.trans at_entry)
+
+/-- The copied packer cannot visit a dispatch before its terminal return. -/
+theorem packing_internal_reaches (program : Counter.Program n m)
+    (row : Fin m) (symbol : Fin (base m)) (values : Fin n → ℕ) (history : ℕ) :
+    InternalReaches program
+      (framed (port row symbol) values history 0)
+      (framed (dispatch row) values (base m * history + symbol.val : ℕ) 0) := by
+  let source := reverseTable (Radix.table (base m))
+  let route : State 2 (Radix.size (base m)) → State (n + 2) (size m) :=
+    fun state => Glue.mapState (copy row)
+      (RegisterRelocation.embed (historyRegister n) (frame values 0 0) state)
+  have mapped : Relation.ReflTransGen (InternalStep program)
+      (route (Radix.point (base m) (Radix.finish (base m) symbol) history 0))
+      (route (Radix.point (base m) (Radix.entry (base m))
+        (base m * history + symbol.val : ℕ) 0)) := by
+    apply Relation.ReflTransGen.lift route
+      (fun first last transition => ?_) _ _ (Radix.reverse_pack (base m) history symbol)
+    have relocated : step (packing n m)
+        (RegisterRelocation.embed (historyRegister n) (frame values 0 0) first) =
+        some (RegisterRelocation.embed (historyRegister n) (frame values 0 0) last) := by
+      change step (RegisterRelocation.mapTable (historyRegister n) source)
+        (RegisterRelocation.embed (historyRegister n) (frame values 0 0) first) = _
+      rw [RegisterRelocation.step_embed (historyRegister n) (historyRegister_injective n)
+        (frame values 0 0) source
+        (reverseTable_deterministic _ (Radix.targetCompatible (base m))), transition, Option.map_some]
+    constructor
+    · exact Glue.step_map_live (packing n m) (table program) (copy row)
+        (fun index => arcEquiv program (.inl (row, index)))
+        (fun index => by simp only [table_arc, arcEdge])
+        (packing_deterministic n m) (deterministic program) relocated
+    · exact not_boundary_copy row first.1 (local_step_not_entry transition)
+        (RegisterRelocation.embed (historyRegister n) (frame values 0 0) first).2
+  simpa only [route, Radix.point, RegisterRelocation.embed, Glue.mapState, framed,
+    frame_extend, port, dispatch] using mapped
+
+private theorem extra_step (program : Counter.Program n m) (arc : Extra program)
+    (state : State (n + 2) (size m)) (enabled : (extraEdge program arc).enabled state) :
+    step (table program) state = some ((extraEdge program arc).execute state) := by
+  apply (step_iff _ (deterministic program)).mpr
+  refine ⟨arcEquiv program (.inr arc), ?_, ?_⟩
+  · simpa only [table_arc, arcEdge] using enabled
+  · rw [table_arc]
+    rfl
+
+private theorem history_digit (row : Fin m) (branch : Fin 2) (history : ℕ) :
+    base m * history + (digit row branch).val =
+      Counter.Recorded.push (finProdFinEquiv (row, branch)) history := by
+  simp only [base, digit, Counter.Recorded.push, Nat.add_assoc]
+
+private theorem pack_firstReturn (program : Counter.Program n m)
+    {initial : State (n + 2) (size m)} {row : Fin m} {symbol : Fin (base m)}
+    {values : Fin n → ℕ} {history : ℕ} (marked : Boundary initial)
+    (first_step : step (table program) initial =
+      some (framed (port row symbol) values history 0)) :
+    FirstReturn program initial
+      (framed (dispatch row) values (base m * history + symbol.val : ℕ) 0) := by
+  exact ⟨marked, ⟨row, rfl⟩, framed (port row symbol) values history 0, first_step,
+    packing_internal_reaches program row symbol values history⟩
+
+private theorem inc_firstReturn (program : Counter.Program n m) (before : Counter.Configuration n m)
+    (history : ℕ) (register : Fin n) (target : Fin m)
+    (instruction : program before.pc = .inc register target) :
+    FirstReturn program (encode before history)
+      (encode ⟨target, Function.update before.counters register (before.counters register + 1)⟩
+        (base m * history + (digit before.pc 0).val)) := by
+  let arc : Extra program := ⟨(before.pc, 0), by
+    unfold Active
+    rw [instruction]⟩
+  have fields := extraEdge_inc program arc register target instruction
+  have enabled : (extraEdge program arc).enabled (encode before history) := by
+    rw [fields]
+    exact ⟨rfl, trivial⟩
+  have first_step := extra_step program arc (encode before history) enabled
+  rw [fields] at first_step
+  simp only [Edge.execute, encode, framed, inc_frame] at first_step
+  exact pack_firstReturn program (boundary_encode before history) first_step
+
+private theorem zero_firstReturn (program : Counter.Program n m) (before : Counter.Configuration n m)
+    (history : ℕ) (register : Fin n) (zero nonzero : Fin m)
+    (instruction : program before.pc = .dec register zero nonzero) (empty : before.counters register = 0) :
+    FirstReturn program (encode before history)
+      (encode ⟨zero, before.counters⟩ (base m * history + (digit before.pc 0).val)) := by
+  let arc : Extra program := ⟨(before.pc, 0), by unfold Active; rw [instruction]; trivial⟩
+  have fields : extraEdge program arc =
+      ⟨dispatch before.pc, port zero (digit before.pc 0), .test (Fin.castAdd 2 register) true⟩ :=
+    extraEdge_dec program arc register zero nonzero instruction
+  have enabled : (extraEdge program arc).enabled (encode before history) := by
+    rw [fields]
+    constructor
+    · rfl
+    · change Action.enabled (.test (Fin.castAdd 2 register) true)
+        (frame before.counters history 0)
+      simp [Action.enabled, empty]
+  have first_step := extra_step program arc (encode before history) enabled
+  rw [fields] at first_step
+  simp only [Edge.execute, Action.apply, encode, framed] at first_step
+  exact pack_firstReturn program (boundary_encode before history) first_step
+
+private theorem positive_firstReturn (program : Counter.Program n m)
+    (before : Counter.Configuration n m) (history : ℕ) (register : Fin n) (zero nonzero : Fin m)
+    (instruction : program before.pc = .dec register zero nonzero) (value : ℕ)
+    (count : before.counters register = value + 1) :
+    FirstReturn program (encode before history)
+      (encode ⟨nonzero, Function.update before.counters register value⟩
+        (base m * history + (digit before.pc 1).val)) := by
+  let probe : Extra program := ⟨(before.pc, 1), by unfold Active; rw [instruction]; trivial⟩
+  let write : Extra program := ⟨(before.pc, 2), by unfold Active; rw [instruction]; trivial⟩
+  have probe_fields : extraEdge program probe =
+      ⟨dispatch before.pc, mid before.pc, .test (Fin.castAdd 2 register) false⟩ :=
+    extraEdge_dec program probe register zero nonzero instruction
+  have write_fields : extraEdge program write =
+      ⟨mid before.pc, port nonzero (digit before.pc 1), .shift (Fin.castAdd 2 register) (-1)⟩ :=
+    extraEdge_dec program write register zero nonzero instruction
+  have probe_enabled : (extraEdge program probe).enabled (encode before history) := by
+    rw [probe_fields]
+    constructor
+    · rfl
+    · change Action.enabled (.test (Fin.castAdd 2 register) false)
+        (frame before.counters history 0)
+      simp [Action.enabled, count]
+      omega
+  have first_step := extra_step program probe (encode before history) probe_enabled
+  rw [probe_fields] at first_step
+  simp only [Edge.execute, Action.apply, encode, framed] at first_step
+  have write_enabled : (extraEdge program write).enabled
+      (framed (mid before.pc) before.counters history 0) := by
+    rw [write_fields]
+    exact ⟨rfl, trivial⟩
+  have second_step := extra_step program write (framed (mid before.pc) before.counters history 0)
+    write_enabled
+  rw [write_fields] at second_step
+  simp only [Edge.execute, framed, dec_frame before.counters history 0 register value count] at second_step
+  refine ⟨boundary_encode before history, ⟨nonzero, rfl⟩,
+    framed (mid before.pc) before.counters history 0, first_step, ?_⟩
+  exact Relation.ReflTransGen.head
+    ⟨second_step, not_boundary_mid before.pc before.counters history 0⟩
+    (packing_internal_reaches program nonzero (digit before.pc 1)
+      (Function.update before.counters register value) history)
+
+/-- Every original counter transition has an actual first return with its complete recoverable log. -/
+theorem step_firstReturn (program : Counter.Program n m) {before after : Counter.Configuration n m}
+    (transition : Counter.step program before = some after) (history : ℕ) :
+    FirstReturn program (encode before history)
+      (encode after (Counter.Recorded.push (Counter.Recorded.tag program before) history)) := by
+  cases instruction : program before.pc with
+  | halt => simp [Counter.step, instruction] at transition
+  | inc register target =>
+      have result := Option.some.inj ((Counter.step_inc program before instruction).symm.trans transition)
+      subst after
+      have run := inc_firstReturn program before history register target instruction
+      rw [history_digit] at run
+      simpa only [Counter.Recorded.tag, Counter.Recorded.branch, instruction] using run
+  | dec register zero nonzero =>
+      cases count : before.counters register with
+      | zero =>
+          have result := Option.some.inj
+            ((Counter.step_dec_zero program before instruction count).symm.trans transition)
+          subst after
+          have run := zero_firstReturn program before history register zero nonzero instruction count
+          rw [history_digit] at run
+          simpa only [Counter.Recorded.tag, Counter.Recorded.branch, instruction, count, ite_true] using run
+      | succ value =>
+          have result := Option.some.inj
+            ((Counter.step_dec_succ program before instruction count).symm.trans transition)
+          subst after
+          have run := positive_firstReturn program before history register zero nonzero instruction value count
+          rw [history_digit] at run
+          simpa [Counter.Recorded.tag, Counter.Recorded.branch, instruction, count] using run
+
+/-- Forgetting the internal boundary condition gives a positive actual execution. -/
+theorem FirstReturn.reaches {program : Counter.Program n m}
+    {first last : State (n + 2) (size m)} (run : FirstReturn program first last) :
+    StateTransition.Reaches₁ (step (table program)) first last := by
+  obtain ⟨_, _, next, initial, interior⟩ := run
+  exact Relation.TransGen.head' initial
+    (Relation.ReflTransGen.mono (fun _ _ edge => edge.1) _ _ interior)
+
+/-- A source transition runs the fixed graph and retains its complete recoverable log. -/
+theorem step_reaches (program : Counter.Program n m) {before after : Counter.Configuration n m}
+    (transition : Counter.step program before = some after) (history : ℕ) :
+    StateTransition.Reaches₁ (step (table program)) (encode before history)
+      (encode after (Counter.Recorded.push (Counter.Recorded.tag program before) history)) :=
+  (step_firstReturn program transition history).reaches
+
+/-- The complete recorded transition system refines to this actual static graph. -/
+theorem recorded_respects (program : Counter.Program n m) :
+    StateTransition.Respects (Counter.Recorded.step program) (step (table program))
+      (fun original compiled => embed original = compiled) := by
+  apply StateTransition.fun_respects.mpr
+  rintro ⟨before, history⟩
+  cases transition : Counter.step program before with
+  | none =>
+      simp only [Counter.Recorded.step, transition, Option.map_none, StateTransition.FRespects, embed]
+      exact (step_encode_none_iff program before history).mpr transition
+  | some after =>
+      simp only [Counter.Recorded.step, transition, Option.map_some, StateTransition.FRespects, embed]
+      exact step_reaches program transition history
+
+/-- Full terminal configurations and undefinedness agree, with the complete history retained. -/
+theorem eval_embed (program : Counter.Program n m) (state : Counter.Recorded.State n m) :
+    eval (table program) (embed state) =
+      embed <$> StateTransition.eval (Counter.Recorded.step program) state :=
+  StateTransition.tr_eval' (Counter.Recorded.step program) (step (table program)) embed
+    (recorded_respects program) state
+
+/-- The same finite graph in reverse restores the entire source configuration and its prior history. -/
+theorem step_reaches_reverse (program : Counter.Program n m)
+    {before after : Counter.Configuration n m}
+    (transition : Counter.step program before = some after) (history : ℕ) :
+    StateTransition.Reaches (step (reverseTable (table program)))
+      (encode after (Counter.Recorded.push (Counter.Recorded.tag program before) history))
+      (encode before history) :=
+  reaches_reverse (table program) (deterministic program) (targetCompatible program)
+    (step_reaches program transition history).to_reflTransGen
+
+
+def Marked (mark : Fin m → Bool) (state : State (n + 2) (size m)) : Prop :=
+  ∃ row, state.1 = dispatch row ∧ mark row = true
+
+instance (mark : Fin m → Bool) (state : State (n + 2) (size m)) : Decidable (Marked mark state) :=
+  inferInstanceAs (Decidable (∃ row, state.1 = dispatch row ∧ mark row = true))
+
+theorem marked_boundary {mark : Fin m → Bool} {state : State (n + 2) (size m)}
+    (marked : Marked mark state) : Boundary state := by
+  obtain ⟨row, same, _⟩ := marked
+  exact ⟨row, same⟩
+
+theorem marked_encode_iff (mark : Fin m → Bool)
+    (state : Counter.Configuration n m) (history : ℕ) :
+    Marked mark (encode state history) ↔ mark state.pc = true := by
+  constructor
+  · rintro ⟨row, same, marked⟩
+    have rows := ((copy_eq_iff state.pc row _ _).mp same).1
+    exact rows.symm ▸ marked
+  · intro marked
+    exact ⟨state.pc, rfl, marked⟩
+
+def InternalMarkedStep (program : Counter.Program n m) (mark : Fin m → Bool)
+    (first last : State (n + 2) (size m)) : Prop :=
+  step (table program) first = some last ∧ ¬ Marked mark first
+
+abbrev InternalMarkedReaches (program : Counter.Program n m) (mark : Fin m → Bool) :=
+  Relation.ReflTransGen (InternalMarkedStep program mark)
+
+def MarkedFirstReturn (program : Counter.Program n m) (mark : Fin m → Bool)
+    (first last : State (n + 2) (size m)) : Prop :=
+  Marked mark first ∧ Marked mark last ∧
+    ∃ after, step (table program) first = some after ∧ InternalMarkedReaches program mark after last
+
+private theorem internal_to_marked (program : Counter.Program n m) (mark : Fin m → Bool)
+    {first last : State (n + 2) (size m)} (run : InternalReaches program first last) :
+    InternalMarkedReaches program mark first last := by
+  induction run with
+  | refl => exact Relation.ReflTransGen.refl
+  | tail _ edge previous =>
+      exact previous.tail ⟨edge.1, fun marked => edge.2 (marked_boundary marked)⟩
+
+/-- An unmarked source instruction has no marked geometric return in its execution. -/
+theorem counter_internal_step (program : Counter.Program n m) (mark : Fin m → Bool)
+    {first last : Counter.Configuration n m} (transition : Counter.step program first = some last)
+    (unmarked : mark first.pc = false) (history : ℕ) :
+    InternalMarkedReaches program mark (encode first history)
+      (encode last (Counter.Recorded.push (Counter.Recorded.tag program first) history)) := by
+  obtain ⟨_, _, next, initial, rest⟩ := step_firstReturn program transition history
+  apply Relation.ReflTransGen.head (b := next) ?_ (internal_to_marked program mark rest)
+  refine ⟨initial, ?_⟩
+  rw [marked_encode_iff, unmarked]
+  decide
+
+/-- A finite unmarked source run retains its full final configuration and its actual history. -/
+theorem counter_internal_reaches (program : Counter.Program n m) (mark : Fin m → Bool)
+    {first last : Counter.Configuration n m}
+    (run : Relation.ReflTransGen (fun current next : Counter.Configuration n m =>
+      Counter.step program current = some next ∧ mark current.pc = false) first last)
+    (history : ℕ) :
+    ∃ finalHistory, history ≤ finalHistory ∧
+      InternalMarkedReaches program mark (encode first history) (encode last finalHistory) := by
+  induction run generalizing history with
+  | refl => exact ⟨history, le_refl history, Relation.ReflTransGen.refl⟩
+  | @tail middle last _ edge previous =>
+      obtain ⟨logged, not_smaller, traversed⟩ := previous history
+      have growth := Counter.Recorded.history_lt program
+        (first := (middle, logged))
+        (last := (last, Counter.Recorded.push (Counter.Recorded.tag program middle) logged))
+        (by simp only [Counter.Recorded.step, edge.1, Option.map_some])
+      exact ⟨Counter.Recorded.push (Counter.Recorded.tag program middle) logged,
+        not_smaller.trans (le_of_lt growth),
+        traversed.trans (counter_internal_step program mark edge.1 edge.2 logged)⟩
+
+/-- A source first return lifts to the first positive return to the fixed marked ports. -/
+theorem marked_firstReturn (program : Counter.Program n m) (mark : Fin m → Bool)
+    {first middle last : Counter.Configuration n m}
+    (initial : Counter.step program first = some middle)
+    (rest : Relation.ReflTransGen (fun current next : Counter.Configuration n m =>
+      Counter.step program current = some next ∧ mark current.pc = false) middle last)
+    (first_marked : mark first.pc = true) (last_marked : mark last.pc = true) (history : ℕ) :
+    ∃ finalHistory, history < finalHistory ∧
+      MarkedFirstReturn program mark (encode first history) (encode last finalHistory) := by
+  obtain ⟨_, _, next, head, inside⟩ := step_firstReturn program initial history
+  obtain ⟨logged, not_smaller, following⟩ := counter_internal_reaches program mark rest
+    (Counter.Recorded.push (Counter.Recorded.tag program first) history)
+  have growth := Counter.Recorded.history_lt program
+    (first := (first, history))
+    (last := (middle, Counter.Recorded.push (Counter.Recorded.tag program first) history))
+    (by simp only [Counter.Recorded.step, initial, Option.map_some])
+  exact ⟨logged, growth.trans_le not_smaller, (marked_encode_iff mark first history).mpr first_marked,
+    (marked_encode_iff mark last logged).mpr last_marked, next, head,
+    (internal_to_marked program mark inside).trans following⟩
+
+private theorem extra_unitShift (program : Counter.Program n m) (arc : Extra program) :
+    Action.UnitShift (extraOperation program arc) := by
+  cases instruction : program arc.val.1 with
+  | inc register target =>
+      rw [extraOperation_inc program arc register target instruction]
+      exact Or.inl rfl
+  | dec register zero nonzero =>
+      rw [extraOperation_dec program arc register zero nonzero instruction]
+      rcases arc with ⟨⟨row, branch⟩, active⟩
+      fin_cases branch <;> simp [Action.UnitShift]
+  | halt =>
+      have active := arc.property
+      unfold Active at active
+      rw [instruction] at active
+      exact active.elim
+
+/-- Every shift of the statically compiled recording graph is exactly one unit. -/
+theorem unitShift (program : Counter.Program n m) (index : Fin (edges program)) :
+    Action.UnitShift (table program index).action := by
+  obtain ⟨arc, rfl⟩ := (arcEquiv program).surjective index
+  rw [table_arc]
+  rcases arc with ⟨row, edge⟩ | arc
+  · change Action.UnitShift
+      (RegisterRelocation.mapAction (historyRegister n)
+        (reverseAction (Radix.table (base m) edge).action))
+    rw [RegisterRelocation.unitShift_mapAction, Action.unitShift_reverse]
+    exact Radix.unitShift (base m) edge
+  · exact extra_unitShift program arc
+
+end Monodromy.Counter.Reversible.Recording
+
+end
+
+/-!
+## Reversible prime compression
+
+A finite virtual register vector is encoded in prime exponents. All arithmetic
+uses the same two-counter radix graph; shared ports select and restore tests.
+Exact first returns preserve the entire source configuration. Ordinary traces
+are derived from that stronger execution statement.
+-/
+
+noncomputable section
+
+namespace Monodromy.Counter.Reversible.PrimeCompression
+
+variable {n q e : ℕ}
+
+def HasSource (source : Table n q e) (position : Fin q) : Prop :=
+  ∃ edge : Fin e, (source edge).source = position
+
+instance (source : Table n q e) (position : Fin q) : Decidable (HasSource source position) :=
+  inferInstanceAs (Decidable (∃ edge : Fin e, (source edge).source = position))
+
+def HasRestore (source : Table n q e) (position : Fin q) : Prop :=
+  ∃ edge : Fin e, (source edge).target = position ∧
+    ∃ register : Fin n, ∃ atZero : Bool, (source edge).action = .test register atZero
+
+instance (source : Table n q e) (position : Fin q) : Decidable (HasRestore source position) :=
+  inferInstanceAs (Decidable (∃ edge : Fin e, (source edge).target = position ∧
+    ∃ register : Fin n, ∃ atZero : Bool, (source edge).action = .test register atZero))
+
+abbrev SourceSite (source : Table n q e) := {position : Fin q // HasSource source position}
+abbrev RestoreSite (source : Table n q e) := {position : Fin q // HasRestore source position}
+abbrev HaltSite (source : Table n q e) := {position : Fin q // ¬ HasSource source position}
+
+def sourceEdge (source : Table n q e) (site : SourceSite source) : Fin e :=
+  Fin.find (fun edge => (source edge).source = site.val) site.property
+
+theorem sourceEdge_spec (source : Table n q e) (site : SourceSite source) :
+    (source (sourceEdge source site)).source = site.val := Fin.find_spec site.property
+
+def restoreEdge (source : Table n q e) (site : RestoreSite source) : Fin e :=
+  Fin.find (fun edge => (source edge).target = site.val ∧
+    ∃ register : Fin n, ∃ atZero : Bool, (source edge).action = .test register atZero) site.property
+
+theorem restoreEdge_spec (source : Table n q e) (site : RestoreSite source) :
+    (source (restoreEdge source site)).target = site.val ∧
+      ∃ register : Fin n, ∃ atZero : Bool,
+        (source (restoreEdge source site)).action = .test register atZero :=
+  Fin.find_spec site.property
+
+def actionRegister : Action n → Fin n
+  | .shift register _ => register
+  | .test register _ => register
+
+abbrev Module (source : Table n q e) := SourceSite source ⊕ RestoreSite source
+
+def moduleRegister (source : Table n q e) : Module source → Fin n
+  | .inl site => actionRegister (source (sourceEdge source site)).action
+  | .inr site => actionRegister (source (restoreEdge source site)).action
+
+def modulus (basis : PrimeCode.Basis n) (source : Table n q e) (block : Module source) : ℕ :=
+  basis.prime (moduleRegister source block)
+
+instance (basis : PrimeCode.Basis n) (source : Table n q e) (block : Module source) :
+    NeZero (modulus basis source block) := ⟨(basis.isPrime _).ne_zero⟩
+
+def reversed (source : Table n q e) : Module source → Bool
+  | .inl site => match (source (sourceEdge source site)).action with
+      | .shift _ amount => decide (amount = 1)
+      | .test _ _ => false
+  | .inr _ => true
+
+def componentTable (basis : PrimeCode.Basis n) (source : Table n q e) (block : Module source) :
+    Table 2 (Radix.size (modulus basis source block)) (Radix.edges (modulus basis source block)) :=
+  if reversed source block then reverseTable (Radix.table (modulus basis source block))
+  else Radix.table (modulus basis source block)
+
+theorem component_deterministic (basis : PrimeCode.Basis n) (source : Table n q e)
+    (block : Module source) : Deterministic (componentTable basis source block) := by
+  unfold componentTable
+  split
+  · exact reverseTable_deterministic _ (Radix.targetCompatible _)
+  · exact Radix.deterministic _
+
+theorem component_targetCompatible (basis : PrimeCode.Basis n) (source : Table n q e)
+    (block : Module source) : TargetCompatible (componentTable basis source block) := by
+  unfold componentTable
+  split
+  · exact reverseTable_targetCompatible _ (Radix.deterministic _)
+  · exact Radix.targetCompatible _
+
+abbrev RawPart (basis : PrimeCode.Basis n) (source : Table n q e) :=
+  Σ block : Module source, Fin (Radix.size (modulus basis source block))
+
+abbrev RawNode (basis : PrimeCode.Basis n) (source : Table n q e) :=
+  HaltSite source ⊕ RawPart basis source
+
+abbrev RawArc (basis : PrimeCode.Basis n) (source : Table n q e) :=
+  Σ block : Module source, Fin (Radix.edges (modulus basis source block))
+
+def rawSize (basis : PrimeCode.Basis n) (source : Table n q e) : ℕ :=
+  Fintype.card (RawNode basis source)
+
+def rawEdges (basis : PrimeCode.Basis n) (source : Table n q e) : ℕ :=
+  Fintype.card (RawArc basis source)
+
+def rawNodeEquiv (basis : PrimeCode.Basis n) (source : Table n q e) :
+    RawNode basis source ≃ Fin (rawSize basis source) := Fintype.equivFin _
+
+def rawArcEquiv (basis : PrimeCode.Basis n) (source : Table n q e) :
+    RawArc basis source ≃ Fin (rawEdges basis source) := Fintype.equivFin _
+
+def moduleNode (basis : PrimeCode.Basis n) (source : Table n q e) (block : Module source)
+    (position : Fin (Radix.size (modulus basis source block))) : Fin (rawSize basis source) :=
+  rawNodeEquiv basis source (.inr ⟨block, position⟩)
+
+def haltNode (basis : PrimeCode.Basis n) (source : Table n q e) (site : HaltSite source) :
+    Fin (rawSize basis source) := rawNodeEquiv basis source (.inl site)
+
+theorem moduleNode_injective (basis : PrimeCode.Basis n) (source : Table n q e) :
+    Function.Injective (fun point : RawPart basis source => moduleNode basis source point.1 point.2) :=
+  (rawNodeEquiv basis source).injective.comp Sum.inr_injective
+
+theorem haltNode_injective (basis : PrimeCode.Basis n) (source : Table n q e) :
+    Function.Injective (haltNode basis source) :=
+  (rawNodeEquiv basis source).injective.comp Sum.inl_injective
+
+theorem haltNode_ne_moduleNode (basis : PrimeCode.Basis n) (source : Table n q e)
+    (site : HaltSite source) (block : Module source)
+    (position : Fin (Radix.size (modulus basis source block))) :
+    haltNode basis source site ≠ moduleNode basis source block position := by
+  intro same
+  have impossible := (rawNodeEquiv basis source).injective same
+  cases impossible
+
+def rawEdge (basis : PrimeCode.Basis n) (source : Table n q e) (arc : RawArc basis source) :
+    Edge 2 (rawSize basis source) :=
+  Glue.mapEdge (moduleNode basis source arc.1) (componentTable basis source arc.1 arc.2)
+
+def rawTable (basis : PrimeCode.Basis n) (source : Table n q e) :
+    Table 2 (rawSize basis source) (rawEdges basis source) :=
+  fun index => rawEdge basis source ((rawArcEquiv basis source).symm index)
+
+@[simp] theorem rawTable_arc (basis : PrimeCode.Basis n) (source : Table n q e)
+    (arc : RawArc basis source) :
+    rawTable basis source (rawArcEquiv basis source arc) = rawEdge basis source arc := by
+  simp [rawTable]
+
+theorem raw_deterministic (basis : PrimeCode.Basis n) (source : Table n q e) :
+    Deterministic (rawTable basis source) := by
+  intro first second different same
+  obtain ⟨⟨left, first⟩, rfl⟩ := (rawArcEquiv basis source).surjective first
+  obtain ⟨⟨right, second⟩, rfl⟩ := (rawArcEquiv basis source).surjective second
+  simp only [rawTable_arc, rawEdge, Glue.mapEdge] at same ⊢
+  have pairs : (⟨left, (componentTable basis source left first).source⟩ : RawPart basis source) =
+      ⟨right, (componentTable basis source right second).source⟩ :=
+    moduleNode_injective basis source same
+  have blocks : left = right := congrArg Sigma.fst pairs
+  subst right
+  have positions : (componentTable basis source left first).source =
+      (componentTable basis source left second).source := by
+    simpa only [Sigma.mk.inj_iff, heq_eq_eq, true_and] using pairs
+  exact component_deterministic basis source left first second
+    (fun equal => different (by subst second; rfl)) positions
+
+theorem raw_targetCompatible (basis : PrimeCode.Basis n) (source : Table n q e) :
+    TargetCompatible (rawTable basis source) := by
+  intro first second different same
+  obtain ⟨⟨left, first⟩, rfl⟩ := (rawArcEquiv basis source).surjective first
+  obtain ⟨⟨right, second⟩, rfl⟩ := (rawArcEquiv basis source).surjective second
+  simp only [rawTable_arc, rawEdge, Glue.mapEdge] at same ⊢
+  have pairs : (⟨left, (componentTable basis source left first).target⟩ : RawPart basis source) =
+      ⟨right, (componentTable basis source right second).target⟩ :=
+    moduleNode_injective basis source same
+  have blocks : left = right := congrArg Sigma.fst pairs
+  subst right
+  have positions : (componentTable basis source left first).target =
+      (componentTable basis source left second).target := by
+    simpa only [Sigma.mk.inj_iff, heq_eq_eq, true_and] using pairs
+  exact component_targetCompatible basis source left first second
+    (fun equal => different (by subst second; rfl)) positions
+
+/-- A live source address is the actual input port of its sole source module. -/
+def sourceInputPosition (basis : PrimeCode.Basis n) (source : Table n q e)
+    (site : SourceSite source) : Fin (Radix.size (modulus basis source (.inl site))) :=
+  if reversed source (.inl site) then Radix.finish _ 0 else Radix.entry _
+
+def sourceInput (basis : PrimeCode.Basis n) (source : Table n q e) (site : SourceSite source) :
+    Fin (rawSize basis source) :=
+  moduleNode basis source (.inl site) (sourceInputPosition basis source site)
+
+/-- Only shift modules use this single output; test modules use their actual remainder port. -/
+def sourceShiftOutput (basis : PrimeCode.Basis n) (source : Table n q e)
+    (site : SourceSite source) : Fin (rawSize basis source) :=
+  moduleNode basis source (.inl site)
+    (if reversed source (.inl site) then Radix.entry _ else Radix.finish _ 0)
+
+def restoreInput (basis : PrimeCode.Basis n) (source : Table n q e) (site : RestoreSite source)
+    (remainder : Fin (modulus basis source (.inr site))) : Fin (rawSize basis source) :=
+  moduleNode basis source (.inr site) (Radix.finish _ remainder)
+
+def restoreOutput (basis : PrimeCode.Basis n) (source : Table n q e) (site : RestoreSite source) :
+    Fin (rawSize basis source) :=
+  moduleNode basis source (.inr site) (Radix.entry _)
+
+/-- Source boundaries are existing input ports; a stopped address is a bare vertex. -/
+def boundary (basis : PrimeCode.Basis n) (source : Table n q e) (position : Fin q) :
+    Fin (rawSize basis source) :=
+  if active : HasSource source position then sourceInput basis source ⟨position, active⟩
+  else haltNode basis source ⟨position, active⟩
+
+@[simp] theorem boundary_source (basis : PrimeCode.Basis n) (source : Table n q e)
+    (site : SourceSite source) : boundary basis source site.val = sourceInput basis source site := by
+  simp only [boundary, dite_eq_left site.property]
+
+@[simp] theorem boundary_halt (basis : PrimeCode.Basis n) (source : Table n q e)
+    (site : HaltSite source) : boundary basis source site.val = haltNode basis source site := by
+  simp only [boundary, dite_eq_right site.property]
+
+theorem sourceInput_injective (basis : PrimeCode.Basis n) (source : Table n q e) :
+    Function.Injective (sourceInput basis source) := by
+  intro first second same
+  have pairs : (⟨Sum.inl first, sourceInputPosition basis source first⟩ : RawPart basis source) =
+      ⟨Sum.inl second, sourceInputPosition basis source second⟩ :=
+    moduleNode_injective basis source same
+  have modules : Sum.inl first = (Sum.inl second : Module source) := congrArg Sigma.fst pairs
+  exact Sum.inl.inj modules
+
+theorem boundary_injective (basis : PrimeCode.Basis n) (source : Table n q e) :
+    Function.Injective (boundary basis source) := by
+  intro first second same
+  by_cases left : HasSource source first
+  · by_cases right : HasSource source second
+    · simp only [boundary, dite_eq_left left, dite_eq_left right] at same
+      exact congrArg Subtype.val (sourceInput_injective basis source same)
+    · simp only [boundary, dite_eq_left left, dite_eq_right right, sourceInput] at same
+      exact False.elim (haltNode_ne_moduleNode basis source ⟨second, right⟩ _ _ same.symm)
+  · by_cases right : HasSource source second
+    · simp only [boundary, dite_eq_right left, dite_eq_left right, sourceInput] at same
+      exact False.elim (haltNode_ne_moduleNode basis source ⟨first, left⟩ _ _ same)
+    · simp only [boundary, dite_eq_right left, dite_eq_right right] at same
+      exact congrArg Subtype.val (haltNode_injective basis source same)
+
+theorem component_no_incoming_sourceInput (basis : PrimeCode.Basis n) (source : Table n q e)
+    (site : SourceSite source) (index : Fin (Radix.edges (modulus basis source (.inl site)))) :
+    (componentTable basis source (.inl site) index).target ≠ sourceInputPosition basis source site := by
+  unfold componentTable sourceInputPosition
+  split_ifs
+  · exact fun same => Radix.no_outgoing_finish _ 0 ⟨index, same⟩
+  · exact Radix.no_incoming_entry _ index
+
+/-- No original edge enters a source boundary; only static port identification can enter it. -/
+theorem raw_no_incoming_boundary (basis : PrimeCode.Basis n) (source : Table n q e)
+    (position : Fin q) (index : Fin (rawEdges basis source)) :
+    (rawTable basis source index).target ≠ boundary basis source position := by
+  intro same
+  obtain ⟨⟨block, index⟩, rfl⟩ := (rawArcEquiv basis source).surjective index
+  simp only [rawTable_arc, rawEdge, Glue.mapEdge] at same
+  by_cases active : HasSource source position
+  · simp only [boundary, dite_eq_left active, sourceInput] at same
+    have pairs : (⟨block, (componentTable basis source block index).target⟩ : RawPart basis source) =
+        ⟨Sum.inl ⟨position, active⟩, sourceInputPosition basis source ⟨position, active⟩⟩ :=
+      moduleNode_injective basis source same
+    have blocks : block = Sum.inl ⟨position, active⟩ := congrArg Sigma.fst pairs
+    subst block
+    have ports : (componentTable basis source (.inl ⟨position, active⟩) index).target =
+        sourceInputPosition basis source ⟨position, active⟩ := by
+      simpa only [Sigma.mk.inj_iff, heq_eq_eq, true_and] using pairs
+    exact component_no_incoming_sourceInput basis source ⟨position, active⟩ index ports
+  · simp only [boundary, dite_eq_right active] at same
+    exact haltNode_ne_moduleNode basis source ⟨position, active⟩ _ _ same.symm
+
+/-- Module labels are preserved before the ports are identified. -/
+theorem moduleNode_module (basis : PrimeCode.Basis n) (source : Table n q e)
+    {first last : Module source}
+    {initial : Fin (Radix.size (modulus basis source first))}
+    {final : Fin (Radix.size (modulus basis source last))}
+    (same : moduleNode basis source first initial = moduleNode basis source last final) :
+    first = last := by
+  have pairs : (⟨first, initial⟩ : RawPart basis source) = ⟨last, final⟩ :=
+    moduleNode_injective basis source same
+  exact congrArg Sigma.fst pairs
+
+/-- Positions in one disjoint module retain their ordinary finite equality. -/
+theorem moduleNode_position (basis : PrimeCode.Basis n) (source : Table n q e)
+    (block : Module source)
+    {first last : Fin (Radix.size (modulus basis source block))}
+    (same : moduleNode basis source block first = moduleNode basis source block last) :
+    first = last := by
+  have pairs : (⟨block, first⟩ : RawPart basis source) = ⟨block, last⟩ :=
+    moduleNode_injective basis source same
+  simpa only [Sigma.mk.inj_iff, heq_eq_eq, true_and] using pairs
+
+/-- A local exit has no outgoing edge in the entire disjoint family. -/
+theorem raw_no_outgoing_moduleNode (basis : PrimeCode.Basis n) (source : Table n q e)
+    (block : Module source) (position : Fin (Radix.size (modulus basis source block)))
+    (no_outgoing : ∀ index, (componentTable basis source block index).source ≠ position)
+    (index : Fin (rawEdges basis source)) :
+    (rawTable basis source index).source ≠ moduleNode basis source block position := by
+  intro same
+  obtain ⟨⟨other, index⟩, rfl⟩ := (rawArcEquiv basis source).surjective index
+  simp only [rawTable_arc, rawEdge, Glue.mapEdge] at same
+  have blocks := moduleNode_module basis source same
+  subst other
+  exact no_outgoing index (moduleNode_position basis source block same)
+
+/-- A local input has no incoming edge in the entire disjoint family. -/
+theorem raw_no_incoming_moduleNode (basis : PrimeCode.Basis n) (source : Table n q e)
+    (block : Module source) (position : Fin (Radix.size (modulus basis source block)))
+    (no_incoming : ∀ index, (componentTable basis source block index).target ≠ position)
+    (index : Fin (rawEdges basis source)) :
+    (rawTable basis source index).target ≠ moduleNode basis source block position := by
+  intro same
+  obtain ⟨⟨other, index⟩, rfl⟩ := (rawArcEquiv basis source).surjective index
+  simp only [rawTable_arc, rawEdge, Glue.mapEdge] at same
+  have blocks := moduleNode_module basis source same
+  subst other
+  exact no_incoming index (moduleNode_position basis source block same)
+
+/-- The source shift's selected exit is an exit in either orientation. -/
+theorem raw_no_outgoing_sourceShiftOutput (basis : PrimeCode.Basis n) (source : Table n q e)
+    (site : SourceSite source) (index : Fin (rawEdges basis source)) :
+    (rawTable basis source index).source ≠ sourceShiftOutput basis source site := by
+  apply raw_no_outgoing_moduleNode
+  intro localIndex
+  unfold componentTable
+  split_ifs with backwards
+  · simpa only [sourceShiftOutput, backwards, reduceIte, reverseTable, reverseEdge] using
+      Radix.no_incoming_entry (modulus basis source (.inl site)) localIndex
+  · simpa only [sourceShiftOutput, backwards, reduceIte] using
+      (fun same => Radix.no_outgoing_finish (modulus basis source (.inl site)) 0 ⟨localIndex, same⟩)
+
+/-- A forward query's actual remainder exits have no outgoing edge. -/
+theorem raw_no_outgoing_sourceFinish (basis : PrimeCode.Basis n) (source : Table n q e)
+    (site : SourceSite source) (remainder : Fin (modulus basis source (.inl site)))
+    (forward : reversed source (.inl site) = false) (index : Fin (rawEdges basis source)) :
+    (rawTable basis source index).source ≠
+      moduleNode basis source (.inl site) (Radix.finish _ remainder) := by
+  apply raw_no_outgoing_moduleNode
+  intro localIndex
+  simpa only [componentTable, forward, Bool.false_eq_true, reduceIte] using
+    (fun same => Radix.no_outgoing_finish (modulus basis source (.inl site)) remainder ⟨localIndex, same⟩)
+
+theorem raw_no_outgoing_restoreOutput (basis : PrimeCode.Basis n) (source : Table n q e)
+    (site : RestoreSite source) (index : Fin (rawEdges basis source)) :
+    (rawTable basis source index).source ≠ restoreOutput basis source site := by
+  apply raw_no_outgoing_moduleNode
+  intro localIndex
+  exact Radix.no_incoming_entry (modulus basis source (.inr site)) localIndex
+
+theorem raw_no_incoming_restoreInput (basis : PrimeCode.Basis n) (source : Table n q e)
+    (site : RestoreSite source) (remainder : Fin (modulus basis source (.inr site)))
+    (index : Fin (rawEdges basis source)) :
+    (rawTable basis source index).target ≠ restoreInput basis source site remainder := by
+  apply raw_no_incoming_moduleNode
+  intro localIndex
+  exact fun same => Radix.no_outgoing_finish (modulus basis source (.inr site)) remainder
+    ⟨localIndex, same⟩
+
+theorem radix_entry_ne_finish (p : ℕ) (remainder : Fin p) :
+    Radix.entry p ≠ Radix.finish p remainder := by
+  intro same
+  cases (Radix.nodeEquiv p).injective same
+
+/-- A source-module point can meet a boundary only at its own source input. -/
+theorem sourceNode_ne_boundary (basis : PrimeCode.Basis n) (source : Table n q e)
+    (site : SourceSite source) (position : Fin (Radix.size (modulus basis source (.inl site))))
+    (different : position ≠ sourceInputPosition basis source site) (target : Fin q) :
+    moduleNode basis source (.inl site) position ≠ boundary basis source target := by
+  intro same
+  by_cases active : HasSource source target
+  · simp only [boundary, dite_eq_left active] at same
+    have sites : site = (⟨target, active⟩ : SourceSite source) :=
+      Sum.inl.inj (moduleNode_module basis source same)
+    have aligned := same.trans (congrArg (sourceInput basis source) sites).symm
+    exact different (moduleNode_position basis source (.inl site) aligned)
+  · simp only [boundary, dite_eq_right active] at same
+    exact haltNode_ne_moduleNode basis source ⟨target, active⟩ _ _ same.symm
+
+theorem sourceShiftOutput_ne_boundary (basis : PrimeCode.Basis n) (source : Table n q e)
+    (site : SourceSite source) (target : Fin q) :
+    sourceShiftOutput basis source site ≠ boundary basis source target := by
+  apply sourceNode_ne_boundary
+  intro same
+  unfold sourceInputPosition at same
+  split_ifs at same
+  · exact radix_entry_ne_finish _ 0 same
+  · exact radix_entry_ne_finish _ 0 same.symm
+
+theorem sourceFinish_ne_boundary (basis : PrimeCode.Basis n) (source : Table n q e)
+    (site : SourceSite source) (remainder : Fin (modulus basis source (.inl site)))
+    (forward : reversed source (.inl site) = false) (target : Fin q) :
+    moduleNode basis source (.inl site) (Radix.finish _ remainder) ≠ boundary basis source target := by
+  apply sourceNode_ne_boundary
+  intro same
+  simp only [sourceInputPosition, forward, Bool.false_eq_true, reduceIte] at same
+  exact radix_entry_ne_finish _ remainder same.symm
+
+theorem restoreOutput_ne_boundary (basis : PrimeCode.Basis n) (source : Table n q e)
+    (site : RestoreSite source) (target : Fin q) :
+    restoreOutput basis source site ≠ boundary basis source target := by
+  intro same
+  by_cases active : HasSource source target
+  · simp only [boundary, dite_eq_left active] at same
+    cases moduleNode_module basis source same
+  · simp only [boundary, dite_eq_right active] at same
+    exact haltNode_ne_moduleNode basis source ⟨target, active⟩ _ _ same.symm
+
+theorem sourceNode_ne_restoreInput (basis : PrimeCode.Basis n) (source : Table n q e)
+    (first : SourceSite source) (position : Fin (Radix.size (modulus basis source (.inl first))))
+    (last : RestoreSite source) (remainder : Fin (modulus basis source (.inr last))) :
+    moduleNode basis source (.inl first) position ≠ restoreInput basis source last remainder := by
+  intro same
+  cases moduleNode_module basis source same
+
+theorem sourceShiftOutput_ne_restoreInput (basis : PrimeCode.Basis n) (source : Table n q e)
+    (first : SourceSite source) (last : RestoreSite source)
+    (remainder : Fin (modulus basis source (.inr last))) :
+    sourceShiftOutput basis source first ≠ restoreInput basis source last remainder :=
+  sourceNode_ne_restoreInput basis source first _ last remainder
+
+theorem sourceFinish_ne_restoreInput (basis : PrimeCode.Basis n) (source : Table n q e)
+    (first : SourceSite source) (initial : Fin (modulus basis source (.inl first)))
+    (last : RestoreSite source) (remainder : Fin (modulus basis source (.inr last))) :
+    moduleNode basis source (.inl first) (Radix.finish _ initial) ≠ restoreInput basis source last remainder :=
+  sourceNode_ne_restoreInput basis source first _ last remainder
+
+theorem restoreOutput_ne_restoreInput (basis : PrimeCode.Basis n) (source : Table n q e)
+    (first last : RestoreSite source) (remainder : Fin (modulus basis source (.inr last))) :
+    restoreOutput basis source first ≠ restoreInput basis source last remainder := by
+  intro same
+  have sites : first = last := Sum.inr.inj (moduleNode_module basis source same)
+  subst first
+  exact radix_entry_ne_finish _ remainder (moduleNode_position basis source (.inr last) same)
+
+/-- An unconditional edge has no different edge at the same compatible owner. -/
+theorem shift_owner_unique (table : Table n q e) (owner : Fin e → Fin q)
+    (compatible : ∀ first second, first ≠ second → owner first = owner second →
+      Action.Compatible (table first).action (table second).action)
+    {first second : Fin e} {register : Fin n} {amount : ℤ}
+    (shift : (table first).action = .shift register amount)
+    (same : owner first = owner second) : first = second := by
+  by_contra different
+  have impossible := compatible first second different same
+  rw [shift] at impossible
+  cases (table second).action <;> exact impossible
+
+/-- Different tests at a common compatible owner use the same register and opposite guards. -/
+theorem test_owner_alternative (table : Table n q e) (owner : Fin e → Fin q)
+    (compatible : ∀ first second, first ≠ second → owner first = owner second →
+      Action.Compatible (table first).action (table second).action)
+    {first second : Fin e} {register : Fin n} {atZero : Bool}
+    (test : (table first).action = .test register atZero)
+    (different : first ≠ second) (same : owner first = owner second) :
+    (table second).action = .test register (!atZero) := by
+  have alternatives := compatible first second different same
+  rw [test] at alternatives
+  cases result : (table second).action with
+  | shift => simp [result, Action.Compatible] at alternatives
+  | test other flag =>
+      rw [result] at alternatives
+      rcases alternatives with ⟨rfl, different_flags⟩
+      cases atZero <;> cases flag <;> simp_all
+
+/-- One test fixes the register of every edge at the same compatible owner. -/
+theorem test_owner_form (table : Table n q e) (owner : Fin e → Fin q)
+    (compatible : ∀ first second, first ≠ second → owner first = owner second →
+      Action.Compatible (table first).action (table second).action)
+    {first second : Fin e} {register : Fin n} {atZero : Bool}
+    (test : (table first).action = .test register atZero)
+    (same : owner first = owner second) :
+    ∃ flag, (table second).action = .test register flag := by
+  by_cases equal : first = second
+  · subst second
+    exact ⟨atZero, test⟩
+  · exact ⟨!atZero, test_owner_alternative table owner compatible test equal same⟩
+
+/-- Shared test modules have an unambiguous virtual register on either side. -/
+theorem test_owner_register_unique (table : Table n q e) (owner : Fin e → Fin q)
+    (compatible : ∀ first second, first ≠ second → owner first = owner second →
+      Action.Compatible (table first).action (table second).action)
+    {first second : Fin e} {register other : Fin n} {atZero otherZero : Bool}
+    (first_test : (table first).action = .test register atZero)
+    (second_test : (table second).action = .test other otherZero)
+    (same : owner first = owner second) : register = other := by
+  obtain ⟨flag, form⟩ := test_owner_form table owner compatible first_test same
+  exact (Action.test.inj (form.symm.trans second_test)).1
+
+/-- The residue port selects zero exactly when the represented exponent is zero. -/
+def testSelected (table : Table n q e) (register : Fin n) (remainder : ℕ) (edge : Fin e) : Bool :=
+  decide ((table edge).action = .test register (decide (remainder ≠ 0)))
+
+@[simp] theorem testSelected_iff (table : Table n q e) (register : Fin n) (remainder : ℕ)
+    (edge : Fin e) :
+    testSelected table register remainder edge = true ↔
+      (table edge).action = .test register (decide (remainder ≠ 0)) := by
+  simp [testSelected]
+
+/-- One reached residue chooses at most one test at each compatible owner. -/
+theorem test_matching (table : Table n q e) (owner : Fin e → Fin q)
+    (compatible : ∀ first second, first ≠ second → owner first = owner second →
+      Action.Compatible (table first).action (table second).action)
+    (register : Fin n) (remainder : ℕ) :
+    ReversiblePorts.Matching owner (testSelected table register remainder) := by
+  intro first second first_selected second_selected same
+  by_contra different
+  have alternatives := compatible first second different same
+  rw [(testSelected_iff table register remainder first).mp first_selected,
+    (testSelected_iff table register remainder second).mp second_selected] at alternatives
+  exact alternatives.2 rfl
+
+theorem source_test_matching (table : Table n q e) (deterministic : Deterministic table)
+    (register : Fin n) (remainder : ℕ) :
+    ReversiblePorts.Matching (fun edge => (table edge).source)
+      (testSelected table register remainder) :=
+  test_matching table (fun edge => (table edge).source) deterministic register remainder
+
+theorem target_test_matching (table : Table n q e) (compatible : TargetCompatible table)
+    (register : Fin n) (remainder : ℕ) :
+    ReversiblePorts.Matching (fun edge => (table edge).target)
+      (testSelected table register remainder) :=
+  test_matching table (fun edge => (table edge).target) compatible register remainder
+
+/-- A shared residue port therefore defines a partial one-to-one source-to-target connection. -/
+theorem test_ports_partial_matching (table : Table n q e)
+    (deterministic : Deterministic table) (compatible : TargetCompatible table)
+    (register : Fin n) (remainder : ℕ) :
+    ReversiblePorts.Matching (fun edge => (table edge).source)
+        (testSelected table register remainder) ∧
+      ReversiblePorts.Matching (fun edge => (table edge).target)
+        (testSelected table register remainder) :=
+  ⟨source_test_matching table deterministic register remainder,
+    target_test_matching table compatible register remainder⟩
+
+/-- Divisibility of the prime code reads the complementary zero/nonzero source test. -/
+theorem residue_zero_flag (basis : Monodromy.PrimeCode.Basis n)
+    (values : Fin n → ℕ) (register : Fin n) :
+    decide (basis.encode values % basis.prime register ≠ 0) = decide (values register = 0) := by
+  apply decide_eq_decide.mpr
+  exact (not_congr (basis.remainder_zero_iff values register)).trans not_not
+
+/-- Test-port selection agrees with the unchanged source guard on the encoded natural domain. -/
+theorem testSelected_encoded_iff (table : Table n q e)
+    (basis : Monodromy.PrimeCode.Basis n) (values : Fin n → ℕ)
+    (register : Fin n) (edge : Fin e) (atZero : Bool)
+    (test : (table edge).action = .test register atZero) :
+    testSelected table register (basis.encode values % basis.prime register) edge = true ↔
+      (table edge).action.enabled (fun index => (values index : ℤ)) := by
+  rw [testSelected_iff, test, residue_zero_flag]
+  cases atZero <;> simp [Action.enabled]
+
+/-- A unit shift leaves its radix module at the original target address. -/
+def ShiftConnection (basis : PrimeCode.Basis n) (source : Table n q e)
+    (exit entry : Fin (rawSize basis source)) : Prop :=
+  ∃ site : SourceSite source,
+    (source (sourceEdge source site)).action.IsShift ∧
+    exit = sourceShiftOutput basis source site ∧
+    entry = boundary basis source (source (sourceEdge source site)).target
+
+/-- Restoring a tested code ends at the target's existing execution boundary. -/
+def RestoreConnection (basis : PrimeCode.Basis n) (source : Table n q e)
+    (exit entry : Fin (rawSize basis source)) : Prop :=
+  ∃ site : RestoreSite source,
+    exit = restoreOutput basis source site ∧ entry = boundary basis source site.val
+
+/-- A reached remainder port chooses a static source edge and its restoration port. -/
+def TestConnection (basis : PrimeCode.Basis n) (source : Table n q e)
+    (exit entry : Fin (rawSize basis source)) : Prop :=
+  ∃ first : SourceSite source, ∃ last : RestoreSite source,
+    ∃ remainder : Fin (modulus basis source (.inl first)),
+    ∃ restored : Fin (modulus basis source (.inr last)), ∃ edge : Fin e,
+      (source edge).source = first.val ∧ (source edge).target = last.val ∧
+      testSelected source (moduleRegister source (.inl first)) remainder.val edge = true ∧
+      moduleRegister source (.inl first) = moduleRegister source (.inr last) ∧
+      remainder.val = restored.val ∧
+      exit = moduleNode basis source (.inl first) (Radix.finish _ remainder) ∧
+      entry = restoreInput basis source last restored
+
+/-- The entire connection relation is finite program data. -/
+def Connection (basis : PrimeCode.Basis n) (source : Table n q e)
+    (exit entry : Fin (rawSize basis source)) : Prop :=
+  ShiftConnection basis source exit entry ∨
+    RestoreConnection basis source exit entry ∨ TestConnection basis source exit entry
+
+instance (basis : PrimeCode.Basis n) (source : Table n q e) :
+    DecidableRel (Connection basis source) := by
+  intro exit entry
+  unfold Connection ShiftConnection RestoreConnection TestConnection
+  infer_instance
+
+private theorem sourceShiftOutput_injective (basis : PrimeCode.Basis n) (source : Table n q e) :
+    Function.Injective (sourceShiftOutput basis source) := by
+  intro first last same
+  exact Sum.inl.inj (moduleNode_module basis source same)
+
+private theorem restoreOutput_injective (basis : PrimeCode.Basis n) (source : Table n q e) :
+    Function.Injective (restoreOutput basis source) := by
+  intro first last same
+  exact Sum.inr.inj (moduleNode_module basis source same)
+
+private theorem source_restore_disjoint (basis : PrimeCode.Basis n) (source : Table n q e)
+    (first : SourceSite source) (last : RestoreSite source)
+    (initial : Fin (Radix.size (modulus basis source (.inl first))))
+    (final : Fin (Radix.size (modulus basis source (.inr last)))) :
+    moduleNode basis source (.inl first) initial ≠ moduleNode basis source (.inr last) final := by
+  intro same
+  cases moduleNode_module basis source same
+
+private theorem selected_source_form (source : Table n q e) (deterministic : Deterministic source)
+    (site : SourceSite source) (remainder : ℕ) (edge : Fin e)
+    (same : (source edge).source = site.val)
+    (chosen : testSelected source (moduleRegister source (.inl site)) remainder edge = true) :
+    ∃ flag, (source (sourceEdge source site)).action =
+      .test (moduleRegister source (.inl site)) flag := by
+  exact test_owner_form source (fun index => (source index).source) deterministic
+    ((testSelected_iff source _ _ edge).mp chosen)
+    (same.trans (sourceEdge_spec source site).symm)
+
+private theorem shift_test_disjoint (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) {exit first last : Fin (rawSize basis source)}
+    (shift : ShiftConnection basis source exit first)
+    (test : TestConnection basis source exit last) : False := by
+  obtain ⟨site, is_shift, exit_shift, _⟩ := shift
+  obtain ⟨start, finish, remainder, restored, edge, same_source, _, selected, _, _, exit_test, _⟩ := test
+  have modules : (Sum.inl site : Module source) = Sum.inl start :=
+    moduleNode_module basis source (exit_shift.symm.trans exit_test)
+  have sites : site = start := Sum.inl.inj modules
+  subst start
+  obtain ⟨flag, form⟩ := selected_source_form source deterministic site remainder.val edge same_source selected
+  rw [form] at is_shift
+  exact is_shift
+
+private theorem test_connection_functional (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) {exit first last : Fin (rawSize basis source)}
+    (left : TestConnection basis source exit first)
+    (right : TestConnection basis source exit last) : first = last := by
+  obtain ⟨left_site, left_target, left_r, left_s, left_edge, left_src, left_dst,
+    left_selected, _, left_values, left_exit, left_entry⟩ := left
+  obtain ⟨right_site, right_target, right_r, right_s, right_edge, right_src, right_dst,
+    right_selected, _, right_values, right_exit, right_entry⟩ := right
+  have sites : left_site = right_site := Sum.inl.inj
+    (moduleNode_module basis source (left_exit.symm.trans right_exit))
+  subst right_site
+  have finishes := moduleNode_position basis source (.inl left_site)
+    (left_exit.symm.trans right_exit)
+  have residues : left_r = right_r := by
+    have pair := (Radix.nodeEquiv _).injective finishes
+    simpa only [Sum.inr.injEq, Prod.mk.injEq, and_true] using pair
+  subst right_r
+  have edges : left_edge = right_edge := source_test_matching source deterministic
+    (moduleRegister source (.inl left_site)) left_r.val
+    left_edge right_edge left_selected right_selected (left_src.trans right_src.symm)
+  subst right_edge
+  have targets : left_target = right_target := Subtype.ext (left_dst.symm.trans right_dst)
+  subst right_target
+  have restored : left_s = right_s := Fin.ext (left_values.symm.trans right_values)
+  subst right_s
+  exact left_entry.trans right_entry.symm
+
+/-- Each existing exit is identified with at most one existing entry. -/
+theorem connection_functional (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) {exit first last : Fin (rawSize basis source)}
+    (left : Connection basis source exit first)
+    (right : Connection basis source exit last) : first = last := by
+  rcases left with left | left | left <;> rcases right with right | right | right
+  · obtain ⟨left_site, _, left_exit, left_entry⟩ := left
+    obtain ⟨right_site, _, right_exit, right_entry⟩ := right
+    have same := sourceShiftOutput_injective basis source (left_exit.symm.trans right_exit)
+    subst right_site
+    exact left_entry.trans right_entry.symm
+  · obtain ⟨left_site, _, left_exit, _⟩ := left
+    obtain ⟨right_site, right_exit, _⟩ := right
+    exact False.elim (source_restore_disjoint basis source left_site right_site _ _
+      (left_exit.symm.trans right_exit))
+  · exact False.elim (shift_test_disjoint basis source deterministic left right)
+  · obtain ⟨left_site, left_exit, _⟩ := left
+    obtain ⟨right_site, _, right_exit, _⟩ := right
+    exact False.elim (source_restore_disjoint basis source right_site left_site _ _
+      (right_exit.symm.trans left_exit))
+  · obtain ⟨left_site, left_exit, left_entry⟩ := left
+    obtain ⟨right_site, right_exit, right_entry⟩ := right
+    have same := restoreOutput_injective basis source (left_exit.symm.trans right_exit)
+    subst right_site
+    exact left_entry.trans right_entry.symm
+  · obtain ⟨left_site, left_exit, _⟩ := left
+    obtain ⟨right_site, _, right_r, _, _, _, _, _, _, _, right_exit, _⟩ := right
+    exact False.elim (source_restore_disjoint basis source right_site left_site _ _
+      (right_exit.symm.trans left_exit))
+  · exact False.elim (shift_test_disjoint basis source deterministic right left)
+  · obtain ⟨left_site, _, left_r, _, _, _, _, _, _, _, left_exit, _⟩ := left
+    obtain ⟨right_site, right_exit, _⟩ := right
+    exact False.elim (source_restore_disjoint basis source left_site right_site _ _
+      (left_exit.symm.trans right_exit))
+  · exact test_connection_functional basis source deterministic left right
+
+private theorem boundary_ne_restoreInput (basis : PrimeCode.Basis n) (source : Table n q e)
+    (position : Fin q) (site : RestoreSite source)
+    (remainder : Fin (modulus basis source (.inr site))) :
+    boundary basis source position ≠ restoreInput basis source site remainder := by
+  intro same
+  by_cases active : HasSource source position
+  · simp only [boundary, dite_eq_left active, sourceInput, restoreInput] at same
+    cases moduleNode_module basis source same
+  · simp only [boundary, dite_eq_right active] at same
+    exact haltNode_ne_moduleNode basis source ⟨position, active⟩ _ _ same
+
+private theorem shift_connection_backward (basis : PrimeCode.Basis n) (source : Table n q e)
+    (compatible : TargetCompatible source) {first last entry : Fin (rawSize basis source)}
+    (left : ShiftConnection basis source first entry)
+    (right : ShiftConnection basis source last entry) : first = last := by
+  obtain ⟨left_site, left_shift, left_exit, left_entry⟩ := left
+  obtain ⟨right_site, _, right_exit, right_entry⟩ := right
+  have targets := boundary_injective basis source (left_entry.symm.trans right_entry)
+  have edges : sourceEdge source left_site = sourceEdge source right_site := by
+    cases action : (source (sourceEdge source left_site)).action with
+    | test => simp [action, Action.IsShift] at left_shift
+    | shift register amount =>
+        exact shift_owner_unique source (fun edge => (source edge).target) compatible action targets
+  have sites : left_site = right_site := Subtype.ext (by
+    calc
+      left_site.val = (source (sourceEdge source left_site)).source :=
+        (sourceEdge_spec source left_site).symm
+      _ = (source (sourceEdge source right_site)).source := congrArg (fun edge => (source edge).source) edges
+      _ = right_site.val := sourceEdge_spec source right_site)
+  subst right_site
+  exact left_exit.trans right_exit.symm
+
+private theorem shift_restore_disjoint (basis : PrimeCode.Basis n) (source : Table n q e)
+    (compatible : TargetCompatible source) {first last entry : Fin (rawSize basis source)}
+    (shift : ShiftConnection basis source first entry)
+    (restore : RestoreConnection basis source last entry) : False := by
+  obtain ⟨left, is_shift, _, left_entry⟩ := shift
+  obtain ⟨right, _, right_entry⟩ := restore
+  have targets := boundary_injective basis source (left_entry.symm.trans right_entry)
+  obtain ⟨register, atZero, test⟩ := (restoreEdge_spec source right).2
+  obtain ⟨flag, form⟩ := test_owner_form source (fun edge => (source edge).target) compatible test
+    ((restoreEdge_spec source right).1.trans targets.symm)
+  rw [form] at is_shift
+  exact is_shift
+
+private theorem test_connection_backward (basis : PrimeCode.Basis n) (source : Table n q e)
+    (compatible : TargetCompatible source) {first last entry : Fin (rawSize basis source)}
+    (left : TestConnection basis source first entry)
+    (right : TestConnection basis source last entry) : first = last := by
+  obtain ⟨left_site, left_target, left_r, left_s, left_edge, left_src, left_dst,
+    left_selected, left_registers, left_values, left_exit, left_entry⟩ := left
+  obtain ⟨right_site, right_target, right_r, right_s, right_edge, right_src, right_dst,
+    right_selected, right_registers, right_values, right_exit, right_entry⟩ := right
+  have targets : left_target = right_target := Sum.inr.inj
+    (moduleNode_module basis source (left_entry.symm.trans right_entry))
+  subst right_target
+  have finishes := moduleNode_position basis source (.inr left_target)
+    (left_entry.symm.trans right_entry)
+  have restored : left_s = right_s := by
+    have pair := (Radix.nodeEquiv _).injective finishes
+    simpa only [Sum.inr.injEq, Prod.mk.injEq, and_true] using pair
+  subst right_s
+  have residues : left_r.val = right_r.val := left_values.trans right_values.symm
+  have registers : moduleRegister source (.inl left_site) = moduleRegister source (.inl right_site) :=
+    left_registers.trans right_registers.symm
+  have right_chosen : testSelected source (moduleRegister source (.inl left_site)) left_r.val
+      right_edge = true := by
+    rw [registers, residues]
+    exact right_selected
+  have edges : left_edge = right_edge := target_test_matching source compatible
+    (moduleRegister source (.inl left_site)) left_r.val left_edge right_edge
+    left_selected right_chosen (left_dst.trans right_dst.symm)
+  subst right_edge
+  have sources : left_site = right_site := Subtype.ext (left_src.symm.trans right_src)
+  subst right_site
+  have residue : left_r = right_r := Fin.ext residues
+  subst right_r
+  exact left_exit.trans right_exit.symm
+
+/-- Static port wiring is injective toward each entry, including all three connection forms. -/
+theorem connection_backward (basis : PrimeCode.Basis n) (source : Table n q e)
+    (compatible : TargetCompatible source) {first last entry : Fin (rawSize basis source)}
+    (left : Connection basis source first entry)
+    (right : Connection basis source last entry) : first = last := by
+  rcases left with left | left | left <;> rcases right with right | right | right
+  · exact shift_connection_backward basis source compatible left right
+  · exact False.elim (shift_restore_disjoint basis source compatible left right)
+  · obtain ⟨site, _, _, entered⟩ := left
+    obtain ⟨_, target, _, residue, _, _, _, _, _, _, _, restored⟩ := right
+    exact False.elim (boundary_ne_restoreInput basis source _ target residue
+      (entered.symm.trans restored))
+  · exact False.elim (shift_restore_disjoint basis source compatible right left)
+  · obtain ⟨left_site, left_exit, left_entry⟩ := left
+    obtain ⟨right_site, right_exit, right_entry⟩ := right
+    have sites : left_site = right_site := Subtype.ext
+      (boundary_injective basis source (left_entry.symm.trans right_entry))
+    subst right_site
+    exact left_exit.trans right_exit.symm
+  · obtain ⟨site, _, entered⟩ := left
+    obtain ⟨_, target, _, residue, _, _, _, _, _, _, _, restored⟩ := right
+    exact False.elim (boundary_ne_restoreInput basis source site.val target residue
+      (entered.symm.trans restored))
+  · obtain ⟨_, target, _, residue, _, _, _, _, _, _, _, restored⟩ := left
+    obtain ⟨site, _, _, entered⟩ := right
+    exact False.elim (boundary_ne_restoreInput basis source _ target residue
+      (entered.symm.trans restored))
+  · obtain ⟨_, target, _, residue, _, _, _, _, _, _, _, restored⟩ := left
+    obtain ⟨site, _, entered⟩ := right
+    exact False.elim (boundary_ne_restoreInput basis source site.val target residue
+      (entered.symm.trans restored))
+  · exact test_connection_backward basis source compatible left right
+
+private theorem selected_forward (source : Table n q e) (deterministic : Deterministic source)
+    (site : SourceSite source) (remainder : ℕ) (edge : Fin e)
+    (same : (source edge).source = site.val)
+    (chosen : testSelected source (moduleRegister source (.inl site)) remainder edge = true) :
+    reversed source (.inl site) = false := by
+  obtain ⟨flag, form⟩ := test_owner_form source (fun index => (source index).source) deterministic
+    ((testSelected_iff source _ _ edge).mp chosen)
+    (same.trans (sourceEdge_spec source site).symm)
+  simp only [reversed, form]
+
+/-- Only true module exits are connected; no original source is removed. -/
+theorem connection_source_free (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (index : Fin (rawEdges basis source))
+    (entry : Fin (rawSize basis source)) :
+    ¬ Connection basis source (rawTable basis source index).source entry := by
+  rintro (shift | restore | test)
+  · obtain ⟨site, _, same, _⟩ := shift
+    exact raw_no_outgoing_sourceShiftOutput basis source site index same
+  · obtain ⟨site, same, _⟩ := restore
+    exact raw_no_outgoing_restoreOutput basis source site index same
+  · obtain ⟨site, _, remainder, _, edge, same_source, _, selected, _, _, same, _⟩ := test
+    exact raw_no_outgoing_sourceFinish basis source site remainder
+      (selected_forward source deterministic site remainder.val edge same_source selected) index same
+
+/-- Every selected destination is an original input with no incoming edge. -/
+theorem connection_target_free (basis : PrimeCode.Basis n) (source : Table n q e)
+    (index : Fin (rawEdges basis source)) (exit : Fin (rawSize basis source)) :
+    ¬ Connection basis source exit (rawTable basis source index).target := by
+  rintro (shift | restore | test)
+  · obtain ⟨site, _, _, same⟩ := shift
+    exact raw_no_incoming_boundary basis source _ index same
+  · obtain ⟨site, _, same⟩ := restore
+    exact raw_no_incoming_boundary basis source site.val index same
+  · obtain ⟨_, site, _, remainder, _, _, _, _, _, _, _, same⟩ := test
+    exact raw_no_incoming_restoreInput basis source site remainder index same
+
+/-- Original execution boundaries are retained vertices of the compressed graph. -/
+theorem boundary_unconnected (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (position : Fin q)
+    (entry : Fin (rawSize basis source)) :
+    ¬ Connection basis source (boundary basis source position) entry := by
+  rintro (shift | restore | test)
+  · obtain ⟨site, _, same, _⟩ := shift
+    exact sourceShiftOutput_ne_boundary basis source site position same.symm
+  · obtain ⟨site, same, _⟩ := restore
+    exact restoreOutput_ne_boundary basis source site position same.symm
+  · obtain ⟨site, _, remainder, _, edge, same_source, _, selected, _, _, same, _⟩ := test
+    exact sourceFinish_ne_boundary basis source site remainder
+      (selected_forward source deterministic site remainder.val edge same_source selected)
+      position same.symm
+
+/-- Restoration entries are retained vertices, including their selected remainder. -/
+theorem restoreInput_unconnected (basis : PrimeCode.Basis n) (source : Table n q e)
+    (site : RestoreSite source) (remainder : Fin (modulus basis source (.inr site)))
+    (entry : Fin (rawSize basis source)) :
+    ¬ Connection basis source (restoreInput basis source site remainder) entry := by
+  rintro (shift | restore | test)
+  · obtain ⟨first, _, same, _⟩ := shift
+    exact sourceShiftOutput_ne_restoreInput basis source first site remainder same.symm
+  · obtain ⟨first, same, _⟩ := restore
+    exact restoreOutput_ne_restoreInput basis source first site remainder same.symm
+  · obtain ⟨first, _, selected, _, _, _, _, _, _, _, same, _⟩ := test
+    exact sourceFinish_ne_restoreInput basis source first selected site remainder same.symm
+
+/-- Identification has depth one: its entry is already a retained control position. -/
+theorem connection_terminal (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) {exit entry : Fin (rawSize basis source)}
+    (connected : Connection basis source exit entry) (next : Fin (rawSize basis source)) :
+    ¬ Connection basis source entry next := by
+  rcases connected with shift | restore | test
+  · obtain ⟨site, _, _, rfl⟩ := shift
+    exact boundary_unconnected basis source deterministic _ next
+  · obtain ⟨site, _, rfl⟩ := restore
+    exact boundary_unconnected basis source deterministic site.val next
+  · obtain ⟨_, site, _, remainder, _, _, _, _, _, _, _, rfl⟩ := test
+    exact restoreInput_unconnected basis source site remainder next
+
+/-- Finite port identification supplies the complete compressed execution table. -/
+def wiring (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source) :
+    PortNetwork.Wiring (rawTable basis source) :=
+  PortNetwork.Wiring.ofRelation (rawTable basis source) (Connection basis source)
+    (connection_functional basis source deterministic)
+    (connection_backward basis source compatible)
+    (connection_terminal basis source deterministic)
+    (connection_source_free basis source deterministic)
+    (connection_target_free basis source)
+
+def size (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source) : ℕ :=
+  PortNetwork.size (wiring basis source deterministic compatible)
+
+/-- Every edge is an existing radix edge on the same two physical counters. -/
+def table (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source) :
+    Table 2 (size basis source deterministic compatible) (rawEdges basis source) :=
+  PortNetwork.table (wiring basis source deterministic compatible)
+
+theorem deterministic (basis : PrimeCode.Basis n) (source : Table n q e)
+    (source_deterministic : Deterministic source) (compatible : TargetCompatible source) :
+    Deterministic (table basis source source_deterministic compatible) :=
+  PortNetwork.deterministic _ (raw_deterministic basis source)
+
+theorem targetCompatible (basis : PrimeCode.Basis n) (source : Table n q e)
+    (source_deterministic : Deterministic source) (compatible : TargetCompatible source) :
+    TargetCompatible (table basis source source_deterministic compatible) :=
+  PortNetwork.targetCompatible _ (raw_targetCompatible basis source)
+
+/-- A retained source boundary is never removed by the static port matching. -/
+theorem boundary_link_none (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source) (position : Fin q) :
+    (wiring basis source deterministic compatible).link (boundary basis source position) = none := by
+  change PortNetwork.relationLink (Connection basis source) (boundary basis source position) = none
+  exact (PortNetwork.relationLink_none_iff (Connection basis source) _).mpr
+    (boundary_unconnected basis source deterministic position)
+
+/-- The complete natural source configuration occupies two integer counters. -/
+def encode (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source)
+    (state : Counter.Configuration n q) : State 2 (size basis source deterministic compatible) :=
+  (PortNetwork.control (wiring basis source deterministic compatible)
+    (boundary basis source state.pc), ![(basis.encode state.counters : ℤ), 0])
+
+/-- No information about the finite address or the complete source register vector is lost. -/
+theorem encode_injective (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source) :
+    Function.Injective (encode basis source deterministic compatible) := by
+  intro first second same
+  have controls := congrArg Prod.fst same
+  have raw_controls := PortNetwork.control_unlinked_injective
+    (wiring basis source deterministic compatible)
+    (boundary_link_none basis source deterministic compatible first.pc)
+    (boundary_link_none basis source deterministic compatible second.pc) controls
+  have addresses := boundary_injective basis source raw_controls
+  have integer_codes := congrArg
+    (fun state : State 2 (size basis source deterministic compatible) => state.2 0) same
+  have codes : basis.encode first.counters = basis.encode second.counters := by
+    apply Int.natCast_inj.mp
+    simpa only [encode, Matrix.cons_val_zero] using integer_codes
+  have registers := basis.encode_injective codes
+  exact congrArg₂ Counter.Configuration.mk addresses registers
+
+/-- A connection is a control-position equality, with no intermediate transition. -/
+theorem connection_controls (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source)
+    {exit entry : Fin (rawSize basis source)} (connected : Connection basis source exit entry) :
+    PortNetwork.control (wiring basis source deterministic compatible) exit =
+      PortNetwork.control (wiring basis source deterministic compatible) entry := by
+  apply PortNetwork.interface
+  change PortNetwork.relationLink (Connection basis source) exit = some entry
+  exact (PortNetwork.relationLink_some_iff (Connection basis source)
+    (connection_functional basis source deterministic) exit entry).mpr connected
+
+/-- A source address without outgoing edges is represented by an isolated raw vertex. -/
+theorem raw_no_outgoing_halt (basis : PrimeCode.Basis n) (source : Table n q e)
+    (position : Fin q) (halted : ¬ HasSource source position) (index : Fin (rawEdges basis source)) :
+    (rawTable basis source index).source ≠ boundary basis source position := by
+  intro same
+  obtain ⟨⟨block, index⟩, rfl⟩ := (rawArcEquiv basis source).surjective index
+  simp only [rawTable_arc, rawEdge, Glue.mapEdge, boundary, dite_eq_right halted] at same
+  exact haltNode_ne_moduleNode basis source ⟨position, halted⟩ _ _ same.symm
+
+/-- Static halts retain their absence of outgoing edges in the actual compressed table. -/
+theorem no_outgoing_boundary (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source)
+    (position : Fin q) (halted : ¬ HasSource source position) :
+    ¬ ∃ index, (table basis source deterministic compatible index).source =
+      PortNetwork.control (wiring basis source deterministic compatible)
+        (boundary basis source position) := by
+  rintro ⟨index, same⟩
+  have raw_controls := PortNetwork.control_unlinked_injective
+    (wiring basis source deterministic compatible)
+    ((wiring basis source deterministic compatible).source_free index)
+    (boundary_link_none basis source deterministic compatible position) same
+  exact raw_no_outgoing_halt basis source position halted index raw_controls
+
+/-- At a statically halted source address the compressed graph stops for every source value. -/
+theorem step_encode_none_of_no_source (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source)
+    (state : Counter.Configuration n q) (halted : ¬ HasSource source state.pc) :
+    step (table basis source deterministic compatible)
+      (encode basis source deterministic compatible state) = none := by
+  rw [step_none_iff]
+  rintro ⟨index, enabled⟩
+  exact no_outgoing_boundary basis source deterministic compatible state.pc halted ⟨index, enabled.1⟩
+
+def siteOfEdge (source : Table n q e) (edge : Fin e) : SourceSite source :=
+  ⟨(source edge).source, edge, rfl⟩
+
+def restoreOfTest (source : Table n q e) (edge : Fin e) (register : Fin n) (flag : Bool)
+    (test : (source edge).action = .test register flag) : RestoreSite source :=
+  ⟨(source edge).target, edge, rfl, register, flag, test⟩
+
+theorem sourceEdge_of_shift (source : Table n q e) (deterministic : Deterministic source)
+    (edge : Fin e) (register : Fin n) (amount : ℤ)
+    (shift : (source edge).action = .shift register amount) :
+    sourceEdge source (siteOfEdge source edge) = edge := by
+  apply Eq.symm
+  exact shift_owner_unique source (fun index => (source index).source) deterministic shift
+    (sourceEdge_spec source (siteOfEdge source edge)).symm
+
+theorem sourceRegister_of_shift (source : Table n q e) (deterministic : Deterministic source)
+    (edge : Fin e) (register : Fin n) (amount : ℤ)
+    (shift : (source edge).action = .shift register amount) :
+    moduleRegister source (.inl (siteOfEdge source edge)) = register := by
+  simp only [moduleRegister, sourceEdge_of_shift source deterministic edge register amount shift,
+    shift, actionRegister]
+
+theorem sourceForm_of_test (source : Table n q e) (deterministic : Deterministic source)
+    (edge : Fin e) (register : Fin n) (flag : Bool)
+    (test : (source edge).action = .test register flag) :
+    ∃ chosen, (source (sourceEdge source (siteOfEdge source edge))).action = .test register chosen :=
+  test_owner_form source (fun index => (source index).source) deterministic test
+    (sourceEdge_spec source (siteOfEdge source edge)).symm
+
+theorem sourceRegister_of_test (source : Table n q e) (deterministic : Deterministic source)
+    (edge : Fin e) (register : Fin n) (flag : Bool)
+    (test : (source edge).action = .test register flag) :
+    moduleRegister source (.inl (siteOfEdge source edge)) = register := by
+  obtain ⟨chosen, form⟩ := sourceForm_of_test source deterministic edge register flag test
+  simp only [moduleRegister, form, actionRegister]
+
+theorem restoreRegister_of_test (source : Table n q e) (compatible : TargetCompatible source)
+    (edge : Fin e) (register : Fin n) (flag : Bool)
+    (test : (source edge).action = .test register flag) :
+    moduleRegister source (.inr (restoreOfTest source edge register flag test)) = register := by
+  obtain ⟨chosen, form⟩ := test_owner_form source (fun index => (source index).target) compatible test
+    (restoreEdge_spec source (restoreOfTest source edge register flag test)).1.symm
+  simp only [moduleRegister, form, actionRegister]
+
+/-- The end of a shift is joined directly to its statically specified target. -/
+theorem shift_connected (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (edge : Fin e) (register : Fin n) (amount : ℤ)
+    (shift : (source edge).action = .shift register amount) :
+    Connection basis source (sourceShiftOutput basis source (siteOfEdge source edge))
+      (boundary basis source (source edge).target) := by
+  refine Or.inl ⟨siteOfEdge source edge, ?_, rfl, ?_⟩
+  · simp only [sourceEdge_of_shift source deterministic edge register amount shift, shift, Action.IsShift]
+  · rw [sourceEdge_of_shift source deterministic edge register amount shift]
+
+/-- Restoration returns directly to the target execution boundary. -/
+theorem restore_connected (basis : PrimeCode.Basis n) (source : Table n q e)
+    (site : RestoreSite source) :
+    Connection basis source (restoreOutput basis source site) (boundary basis source site.val) :=
+  Or.inr (Or.inl ⟨site, rfl, rfl⟩)
+
+/-- A selected test edge identifies exactly the actually reached remainder ports. -/
+theorem test_connected (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source)
+    (edge : Fin e) (register : Fin n) (flag : Bool)
+    (test : (source edge).action = .test register flag)
+    (remainder : Fin (modulus basis source (.inl (siteOfEdge source edge))))
+    (restored : Fin (modulus basis source (.inr (restoreOfTest source edge register flag test))))
+    (same : remainder.val = restored.val) (selected : decide (remainder.val ≠ 0) = flag) :
+    Connection basis source
+      (moduleNode basis source (.inl (siteOfEdge source edge)) (Radix.finish _ remainder))
+      (restoreInput basis source (restoreOfTest source edge register flag test) restored) := by
+  refine Or.inr (Or.inr ⟨siteOfEdge source edge, restoreOfTest source edge register flag test,
+    remainder, restored, edge, rfl, rfl, ?_, ?_, same, rfl, rfl⟩)
+  · rw [testSelected_iff, sourceRegister_of_test source deterministic edge register flag test, selected]
+    exact test
+  · exact (sourceRegister_of_test source deterministic edge register flag test).trans
+      (restoreRegister_of_test source compatible edge register flag test).symm
+
+theorem component_step_map (basis : PrimeCode.Basis n) (source : Table n q e)
+    (block : Module source)
+    {first last : State 2 (Radix.size (modulus basis source block))}
+    (transition : step (componentTable basis source block) first = some last) :
+    step (rawTable basis source) (Glue.mapState (moduleNode basis source block) first) =
+      some (Glue.mapState (moduleNode basis source block) last) := by
+  exact Glue.step_map_live (componentTable basis source block) (rawTable basis source)
+    (moduleNode basis source block) (fun index => rawArcEquiv basis source ⟨block, index⟩)
+    (fun index => by rw [rawTable_arc]; rfl)
+    (component_deterministic basis source block) (raw_deterministic basis source) transition
+
+theorem component_reaches_map (basis : PrimeCode.Basis n) (source : Table n q e)
+    (block : Module source)
+    {first last : State 2 (Radix.size (modulus basis source block))}
+    (run : StateTransition.Reaches (step (componentTable basis source block)) first last) :
+    StateTransition.Reaches (step (rawTable basis source))
+      (Glue.mapState (moduleNode basis source block) first)
+      (Glue.mapState (moduleNode basis source block) last) := by
+  exact Glue.reaches_map_live (componentTable basis source block) (rawTable basis source)
+    (moduleNode basis source block) (fun index => rawArcEquiv basis source ⟨block, index⟩)
+    (fun index => by rw [rawTable_arc]; rfl)
+    (component_deterministic basis source block) (raw_deterministic basis source) run
+
+theorem component_reaches1_map (basis : PrimeCode.Basis n) (source : Table n q e)
+    (block : Module source)
+    {first last : State 2 (Radix.size (modulus basis source block))}
+    (run : StateTransition.Reaches₁ (step (componentTable basis source block)) first last) :
+    StateTransition.Reaches₁ (step (rawTable basis source))
+      (Glue.mapState (moduleNode basis source block) first)
+      (Glue.mapState (moduleNode basis source block) last) := by
+  induction run with
+  | single transition => exact Relation.TransGen.single (component_step_map basis source block transition)
+  | tail _ transition previous => exact previous.tail (component_step_map basis source block transition)
+
+private theorem positive_of_control_ne {d f : ℕ} (table : Table 2 d f)
+    {first last : State 2 d} (run : StateTransition.Reaches (step table) first last)
+    (different : first.1 ≠ last.1) : StateTransition.Reaches₁ (step table) first last := by
+  rcases Relation.reflTransGen_iff_eq_or_transGen.mp run with same | positive
+  · exact False.elim (different (congrArg Prod.fst same.symm))
+  · exact positive
+
+/-- The forward radix module has a positive execution to its actual quotient and remainder. -/
+theorem forward_query_local_positive (basis : PrimeCode.Basis n) (source : Table n q e)
+    (site : SourceSite source) (forward : reversed source (.inl site) = false) (value : ℕ) :
+    let p := modulus basis source (.inl site)
+    StateTransition.Reaches₁ (step (componentTable basis source (.inl site)))
+      (Radix.point p (Radix.entry p) value 0)
+      (Radix.point p (Radix.finish p (Counter.DivMod.residue p value)) (value / p : ℕ) 0) := by
+  dsimp only
+  apply positive_of_control_ne
+  · simpa only [componentTable, forward, Bool.false_eq_true, reduceIte] using
+      Radix.reaches_result (modulus basis source (.inl site)) value
+  · exact radix_entry_ne_finish _ _
+
+/-- The reversed radix module packs a zero remainder by actual positive execution. -/
+theorem source_multiply_local_positive (basis : PrimeCode.Basis n) (source : Table n q e)
+    (site : SourceSite source) (backwards : reversed source (.inl site) = true) (value : ℕ) :
+    let p := modulus basis source (.inl site)
+    StateTransition.Reaches₁ (step (componentTable basis source (.inl site)))
+      (Radix.point p (Radix.finish p 0) value 0)
+      (Radix.point p (Radix.entry p) (p * value : ℕ) 0) := by
+  dsimp only
+  apply positive_of_control_ne
+  · simpa only [componentTable, backwards, reduceIte, Fin.val_zero, Nat.add_zero] using
+      Radix.reverse_pack (modulus basis source (.inl site)) value 0
+  · exact (radix_entry_ne_finish _ 0).symm
+
+/-- The restoration module positively packs its quotient and reached remainder. -/
+theorem restore_pack_local_positive (basis : PrimeCode.Basis n) (source : Table n q e)
+    (site : RestoreSite source) (remainder : Fin (modulus basis source (.inr site))) (quotient : ℕ) :
+    let p := modulus basis source (.inr site)
+    StateTransition.Reaches₁ (step (componentTable basis source (.inr site)))
+      (Radix.point p (Radix.finish p remainder) quotient 0)
+      (Radix.point p (Radix.entry p) (p * quotient + remainder.val : ℕ) 0) := by
+  dsimp only
+  apply positive_of_control_ne
+  · exact Radix.reverse_pack _ quotient remainder
+  · exact (radix_entry_ne_finish _ remainder).symm
+
+/-- A forward source module actually reaches its remainder port with the quotient. -/
+theorem forward_query_positive (basis : PrimeCode.Basis n) (source : Table n q e)
+    (site : SourceSite source) (forward : reversed source (.inl site) = false) (value : ℕ) :
+    StateTransition.Reaches₁ (step (rawTable basis source))
+      (sourceInput basis source site, ![(value : ℤ), 0])
+      (moduleNode basis source (.inl site)
+        (Radix.finish _ (Counter.DivMod.residue (modulus basis source (.inl site)) value)),
+        ![((value / modulus basis source (.inl site) : ℕ) : ℤ), 0]) := by
+  simpa only [Glue.mapState, Radix.point, sourceInput, sourceInputPosition, forward,
+    Bool.false_eq_true, reduceIte] using component_reaches1_map basis source (.inl site)
+      (forward_query_local_positive basis source site forward value)
+
+/-- A reversed source module multiplies by its fixed prime through the same radix graph. -/
+theorem source_multiply_positive (basis : PrimeCode.Basis n) (source : Table n q e)
+    (site : SourceSite source) (backwards : reversed source (.inl site) = true) (value : ℕ) :
+    StateTransition.Reaches₁ (step (rawTable basis source))
+      (sourceInput basis source site, ![(value : ℤ), 0])
+      (sourceShiftOutput basis source site,
+        ![((modulus basis source (.inl site) * value : ℕ) : ℤ), 0]) := by
+  simpa only [Glue.mapState, Radix.point, sourceInput, sourceInputPosition, sourceShiftOutput,
+    backwards, reduceIte] using component_reaches1_map basis source (.inl site)
+      (source_multiply_local_positive basis source site backwards value)
+
+/-- A restoration module packs its actual quotient and reached remainder. -/
+theorem restore_pack_positive (basis : PrimeCode.Basis n) (source : Table n q e)
+    (site : RestoreSite source) (remainder : Fin (modulus basis source (.inr site))) (quotient : ℕ) :
+    StateTransition.Reaches₁ (step (rawTable basis source))
+      (restoreInput basis source site remainder, ![(quotient : ℤ), 0])
+      (restoreOutput basis source site,
+        ![((modulus basis source (.inr site) * quotient + remainder.val : ℕ) : ℤ), 0]) := by
+  simpa only [Glue.mapState, Radix.point, restoreInput, restoreOutput] using
+    component_reaches1_map basis source (.inr site)
+      (restore_pack_local_positive basis source site remainder quotient)
+
+/-- Exactly the retained finite source execution boundaries. -/
+def Boundary (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source)
+    (state : State 2 (size basis source deterministic compatible)) : Prop :=
+  ∃ position : Fin q, state.1 = PortNetwork.control (wiring basis source deterministic compatible)
+    (boundary basis source position)
+
+/-- State relocation changes only the finite control address. -/
+def MappedState (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source) (block : Module source)
+    (state : State 2 (Radix.size (modulus basis source block))) :
+    State 2 (size basis source deterministic compatible) :=
+  Glue.mapState (PortNetwork.control (wiring basis source deterministic compatible))
+    (Glue.mapState (moduleNode basis source block) state)
+
+/-- The actual compiled step with an observation on its source, not a new execution rule. -/
+def InternalStep (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source)
+    (first last : State 2 (size basis source deterministic compatible)) : Prop :=
+  step (table basis source deterministic compatible) first = some last ∧
+    ¬ Boundary basis source deterministic compatible first
+
+abbrev InternalReaches (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source) :=
+  Relation.ReflTransGen (InternalStep basis source deterministic compatible)
+
+/-- A positive compiled run, with no earlier return to a source execution boundary. -/
+def FirstReturn (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source)
+    (first last : State 2 (size basis source deterministic compatible)) : Prop :=
+  Boundary basis source deterministic compatible first ∧
+  Boundary basis source deterministic compatible last ∧
+  ∃ next, step (table basis source deterministic compatible) first = some next ∧
+    InternalReaches basis source deterministic compatible next last
+
+theorem boundary_encode (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source)
+    (state : Counter.Configuration n q) :
+    Boundary basis source deterministic compatible (encode basis source deterministic compatible state) :=
+  ⟨state.pc, rfl⟩
+
+/-- A local step is executed by precisely the retained compressed table. -/
+theorem mapped_step (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source) (block : Module source)
+    {first last : State 2 (Radix.size (modulus basis source block))}
+    (transition : step (componentTable basis source block) first = some last) :
+    step (table basis source deterministic compatible)
+      (MappedState basis source deterministic compatible block first) =
+      some (MappedState basis source deterministic compatible block last) :=
+  PortNetwork.step_map_live (wiring basis source deterministic compatible)
+    (raw_deterministic basis source) (component_step_map basis source block transition)
+
+/-- A local state's control is retained whenever it is the source of an actual edge. -/
+theorem module_source_unlinked (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source) (block : Module source)
+    {first last : State 2 (Radix.size (modulus basis source block))}
+    (transition : step (componentTable basis source block) first = some last) :
+    (wiring basis source deterministic compatible).link (moduleNode basis source block first.1) = none := by
+  obtain ⟨index, enabled, _⟩ := (step_iff (rawTable basis source) (raw_deterministic basis source)).mp
+    (component_step_map basis source block transition)
+  have source_eq : (rawTable basis source index).source = moduleNode basis source block first.1 := enabled.1
+  rw [← source_eq]
+  exact (wiring basis source deterministic compatible).source_free index
+
+/-- No step of a source module targets its own input port. -/
+theorem source_target_ne_input (basis : PrimeCode.Basis n) (source : Table n q e)
+    (site : SourceSite source)
+    {first last : State 2 (Radix.size (modulus basis source (.inl site)))}
+    (transition : step (componentTable basis source (.inl site)) first = some last) :
+    last.1 ≠ sourceInputPosition basis source site := by
+  obtain ⟨index, _, result⟩ := (step_iff _ (component_deterministic basis source (.inl site))).mp transition
+  intro equal
+  exact component_no_incoming_sourceInput basis source site index
+    ((congrArg Prod.fst result).trans equal)
+
+private theorem source_internal_step (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source) (site : SourceSite source)
+    {first last : State 2 (Radix.size (modulus basis source (.inl site)))}
+    (interior : first.1 ≠ sourceInputPosition basis source site)
+    (transition : step (componentTable basis source (.inl site)) first = some last) :
+    InternalStep basis source deterministic compatible
+      (MappedState basis source deterministic compatible (.inl site) first)
+      (MappedState basis source deterministic compatible (.inl site) last) := by
+  refine ⟨mapped_step basis source deterministic compatible (.inl site) transition, ?_⟩
+  rintro ⟨position, equal⟩
+  have raw_equal := PortNetwork.control_unlinked_injective (wiring basis source deterministic compatible)
+    (module_source_unlinked basis source deterministic compatible (.inl site) transition)
+    (boundary_link_none basis source deterministic compatible position) equal
+  exact sourceNode_ne_boundary basis source site first.1 interior position raw_equal
+
+/-- A source-module run beginning past its input has only interior compiled sources. -/
+theorem source_internal_reaches (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source) (site : SourceSite source)
+    {first last : State 2 (Radix.size (modulus basis source (.inl site)))}
+    (run : StateTransition.Reaches (step (componentTable basis source (.inl site))) first last)
+    (interior : first.1 ≠ sourceInputPosition basis source site) :
+    InternalReaches basis source deterministic compatible
+      (MappedState basis source deterministic compatible (.inl site) first)
+      (MappedState basis source deterministic compatible (.inl site) last) := by
+  have lifted : InternalReaches basis source deterministic compatible
+      (MappedState basis source deterministic compatible (.inl site) first)
+      (MappedState basis source deterministic compatible (.inl site) last) ∧
+      last.1 ≠ sourceInputPosition basis source site := by
+    induction run with
+    | refl => exact ⟨Relation.ReflTransGen.refl, interior⟩
+    | tail _ transition previous =>
+        exact ⟨previous.1.tail (source_internal_step basis source deterministic compatible site previous.2 transition),
+          source_target_ne_input basis source site transition⟩
+  exact lifted.1
+
+/-- After its first actual step, every positive source-module run is interior
+until its terminal port. No extra transition is inserted at departure. -/
+theorem source_departure (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source) (site : SourceSite source)
+    {first last : State 2 (Radix.size (modulus basis source (.inl site)))}
+    (run : StateTransition.Reaches₁ (step (componentTable basis source (.inl site))) first last) :
+    ∃ next, step (table basis source deterministic compatible)
+      (MappedState basis source deterministic compatible (.inl site) first) = some next ∧
+      InternalReaches basis source deterministic compatible next
+        (MappedState basis source deterministic compatible (.inl site) last) := by
+  obtain ⟨middle, initial, rest⟩ := Relation.TransGen.head'_iff.mp run
+  exact ⟨MappedState basis source deterministic compatible (.inl site) middle,
+    mapped_step basis source deterministic compatible (.inl site) initial,
+    source_internal_reaches basis source deterministic compatible site rest
+      (source_target_ne_input basis source site initial)⟩
+
+private theorem restoreNode_ne_boundary (basis : PrimeCode.Basis n) (source : Table n q e)
+    (site : RestoreSite source) (position : Fin (Radix.size (modulus basis source (.inr site))))
+    (target : Fin q) : moduleNode basis source (.inr site) position ≠ boundary basis source target := by
+  intro same
+  by_cases active : HasSource source target
+  · simp only [boundary, dite_eq_left active, sourceInput] at same
+    cases moduleNode_module basis source same
+  · simp only [boundary, dite_eq_right active] at same
+    exact haltNode_ne_moduleNode basis source ⟨target, active⟩ _ _ same.symm
+
+private theorem restore_internal_step (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source) (site : RestoreSite source)
+    {first last : State 2 (Radix.size (modulus basis source (.inr site)))}
+    (transition : step (componentTable basis source (.inr site)) first = some last) :
+    InternalStep basis source deterministic compatible
+      (MappedState basis source deterministic compatible (.inr site) first)
+      (MappedState basis source deterministic compatible (.inr site) last) := by
+  refine ⟨mapped_step basis source deterministic compatible (.inr site) transition, ?_⟩
+  rintro ⟨position, equal⟩
+  have raw_equal := PortNetwork.control_unlinked_injective (wiring basis source deterministic compatible)
+    (module_source_unlinked basis source deterministic compatible (.inr site) transition)
+    (boundary_link_none basis source deterministic compatible position) equal
+  exact restoreNode_ne_boundary basis source site first.1 position raw_equal
+
+/-- Restoration has no source boundary until its terminal output is identified with one. -/
+theorem restore_internal_reaches (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source) (site : RestoreSite source)
+    {first last : State 2 (Radix.size (modulus basis source (.inr site)))}
+    (run : StateTransition.Reaches (step (componentTable basis source (.inr site))) first last) :
+    InternalReaches basis source deterministic compatible
+      (MappedState basis source deterministic compatible (.inr site) first)
+      (MappedState basis source deterministic compatible (.inr site) last) := by
+  exact Relation.ReflTransGen.lift (MappedState basis source deterministic compatible (.inr site))
+    (fun _ _ transition => restore_internal_step basis source deterministic compatible site transition) _ _ run
+
+theorem increment_firstReturn (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source)
+    (before : Counter.Configuration n q) (edge : Fin e) (register : Fin n)
+    (at_source : (source edge).source = before.pc)
+    (instruction : (source edge).action = .shift register 1) :
+    FirstReturn basis source deterministic compatible
+      (encode basis source deterministic compatible before)
+      (encode basis source deterministic compatible
+        ⟨(source edge).target, Function.update before.counters register (before.counters register + 1)⟩) := by
+  let site := siteOfEdge source edge
+  let p := modulus basis source (.inl site)
+  let value := basis.encode before.counters
+  have backwards : reversed source (.inl site) = true := by
+    simp only [site, reversed,
+      sourceEdge_of_shift source deterministic edge register 1 instruction, instruction,
+      decide_true]
+  have prime : p = basis.prime register := by
+    exact congrArg basis.prime
+      (sourceRegister_of_shift source deterministic edge register 1 instruction)
+  have initial : boundary basis source before.pc = sourceInput basis source site := by
+    rw [← at_source]
+    exact boundary_source basis source site
+  have input : moduleNode basis source (.inl site) (Radix.finish p 0) =
+      sourceInput basis source site := by
+    simp [sourceInput, sourceInputPosition, backwards, p]
+  have output : moduleNode basis source (.inl site) (Radix.entry p) =
+      sourceShiftOutput basis source site := by
+    simp [sourceShiftOutput, backwards, p]
+  have final := connection_controls basis source deterministic compatible
+    (shift_connected basis source deterministic edge register 1 instruction)
+  have code : p * value =
+      basis.encode (Function.update before.counters register (before.counters register + 1)) := by
+    rw [prime]
+    exact (basis.encode_increment before.counters register).symm
+  have departure := source_departure basis source deterministic compatible site
+    (source_multiply_local_positive basis source site backwards value)
+  simp only [MappedState, Glue.mapState, Radix.point] at departure
+  rw [input, ← initial, output, final, code] at departure
+  exact ⟨boundary_encode basis source deterministic compatible before,
+    boundary_encode basis source deterministic compatible _, departure⟩
+
+theorem decrement_firstReturn (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source)
+    (before : Counter.Configuration n q) (edge : Fin e) (register : Fin n)
+    (at_source : (source edge).source = before.pc)
+    (instruction : (source edge).action = .shift register (-1))
+    (positive : before.counters register ≠ 0) :
+    FirstReturn basis source deterministic compatible
+      (encode basis source deterministic compatible before)
+      (encode basis source deterministic compatible
+        ⟨(source edge).target, Function.update before.counters register (before.counters register - 1)⟩) := by
+  let site := siteOfEdge source edge
+  let p := modulus basis source (.inl site)
+  let value := basis.encode before.counters
+  have forward : reversed source (.inl site) = false := by
+    dsimp only [site, reversed]
+    rw [sourceEdge_of_shift source deterministic edge register (-1) instruction, instruction]
+    change decide ((-1 : ℤ) = 1) = false
+    decide
+  have prime : p = basis.prime register := by
+    dsimp only [p, modulus, site]
+    rw [sourceRegister_of_shift source deterministic edge register (-1) instruction]
+  have divisible : p ∣ value := by
+    rw [prime]
+    exact (basis.prime_dvd_encode_iff before.counters register).mpr positive
+  have remainder_zero : Counter.DivMod.residue p value = 0 := by
+    apply Fin.ext
+    change value % p = 0
+    exact Nat.mod_eq_zero_of_dvd divisible
+  have initial : sourceInput basis source site = boundary basis source before.pc := by
+    rw [← boundary_source basis source site]
+    exact congrArg (boundary basis source) at_source
+  have input : moduleNode basis source (.inl site) (Radix.entry p) =
+      sourceInput basis source site := by
+    simp [sourceInput, sourceInputPosition, forward, p]
+  have output : moduleNode basis source (.inl site) (Radix.finish p 0) =
+      sourceShiftOutput basis source site := by
+    simp [sourceShiftOutput, forward, p]
+  have final := connection_controls basis source deterministic compatible
+    (shift_connected basis source deterministic edge register (-1) instruction)
+  have code : basis.encode (Function.update before.counters register (before.counters register - 1)) =
+      value / p := by
+    rw [prime]
+    exact basis.encode_decrement before.counters register positive
+  have local_run := forward_query_local_positive basis source site forward value
+  change StateTransition.Reaches₁ (step (componentTable basis source (.inl site)))
+    (Radix.point p (Radix.entry p) value 0)
+    (Radix.point p (Radix.finish p (Counter.DivMod.residue p value)) (value / p : ℕ) 0) at local_run
+  rw [remainder_zero] at local_run
+  have departure := source_departure basis source deterministic compatible site local_run
+  simp only [MappedState, Glue.mapState, Radix.point] at departure
+  rw [input, initial, output, final, ← code] at departure
+  exact ⟨boundary_encode basis source deterministic compatible before,
+    boundary_encode basis source deterministic compatible _, departure⟩
+
+theorem test_firstReturn (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source)
+    (before : Counter.Configuration n q) (edge : Fin e) (register : Fin n) (flag : Bool)
+    (at_source : (source edge).source = before.pc)
+    (test : (source edge).action = .test register flag)
+    (enabled : (source edge).action.enabled (fun index => (before.counters index : ℤ))) :
+    FirstReturn basis source deterministic compatible
+      (encode basis source deterministic compatible before)
+      (encode basis source deterministic compatible ⟨(source edge).target, before.counters⟩) := by
+  let first := siteOfEdge source edge
+  let last := restoreOfTest source edge register flag test
+  let value := basis.encode before.counters
+  let p := modulus basis source (.inl first)
+  let remainder := Counter.DivMod.residue p value
+  have first_register : moduleRegister source (.inl first) = register :=
+    sourceRegister_of_test source deterministic edge register flag test
+  have last_register : moduleRegister source (.inr last) = register :=
+    restoreRegister_of_test source compatible edge register flag test
+  have same_modulus : p = modulus basis source (.inr last) :=
+    congrArg basis.prime (first_register.trans last_register.symm)
+  let restored : Fin (modulus basis source (.inr last)) :=
+    ⟨remainder.val, by rw [← same_modulus]; exact remainder.isLt⟩
+  have forward : reversed source (.inl first) = false := by
+    obtain ⟨chosen, form⟩ := sourceForm_of_test source deterministic edge register flag test
+    simp only [reversed, first, form]
+  have zero_flag : decide (before.counters register = 0) = flag := by
+    cases flag <;> simp_all [Action.enabled]
+  have selected : decide (remainder.val ≠ 0) = flag := by
+    change decide (value % p ≠ 0) = flag
+    have prime : p = basis.prime register := congrArg basis.prime first_register
+    rw [prime, residue_zero_flag, zero_flag]
+  obtain ⟨next, initial_step, inside⟩ := source_departure basis source deterministic compatible first
+    (forward_query_local_positive basis source first forward value)
+  have restore := restore_internal_reaches basis source deterministic compatible last
+    (restore_pack_local_positive basis source last restored (value / p)).to_reflTransGen
+  simp only [MappedState, Glue.mapState, Radix.point] at initial_step inside restore
+  have ports := connection_controls basis source deterministic compatible
+    (test_connected basis source deterministic compatible edge register flag test remainder restored rfl selected)
+  rw [ports] at inside
+  change InternalReaches basis source deterministic compatible
+    (PortNetwork.control (wiring basis source deterministic compatible)
+      (restoreInput basis source last restored), ![((value / p : ℕ) : ℤ), 0])
+    (PortNetwork.control (wiring basis source deterministic compatible)
+      (restoreOutput basis source last),
+      ![((modulus basis source (.inr last) * (value / p) + restored.val : ℕ) : ℤ), 0]) at restore
+  have final_port := connection_controls basis source deterministic compatible (restore_connected basis source last)
+  rw [final_port] at restore
+  have arithmetic : modulus basis source (.inr last) * (value / p) + restored.val = value := by
+    change modulus basis source (.inr last) * (value / p) + remainder.val = value
+    rw [← same_modulus]
+    change p * (value / p) + value % p = value
+    have division := Nat.mod_add_div value p
+    omega
+  rw [arithmetic] at restore
+  have initial : boundary basis source before.pc = sourceInput basis source first := by
+    rw [← at_source]
+    exact boundary_source basis source first
+  have input : moduleNode basis source (.inl first) (Radix.entry p) =
+      sourceInput basis source first := by
+    simp only [sourceInput, sourceInputPosition, forward, Bool.false_eq_true, reduceIte]
+    rfl
+  rw [input, ← initial] at initial_step
+  exact ⟨boundary_encode basis source deterministic compatible before,
+    boundary_encode basis source deterministic compatible ⟨(source edge).target, before.counters⟩,
+    next, initial_step, inside.trans restore⟩
+
+/-- Natural configurations are viewed inside the integer source state space. -/
+def naturalState (state : Counter.Configuration n q) : State n q :=
+  (state.pc, fun index => (state.counters index : ℤ))
+
+theorem naturalState_injective : Function.Injective (@naturalState n q) := by
+  intro first second same
+  apply congrArg₂ Counter.Configuration.mk
+  · exact congrArg Prod.fst same
+  · funext index
+    exact Int.natCast_inj.mp (congrArg (fun state : State n q => state.2 index) same)
+
+private theorem naturalState_shift (before : Counter.Configuration n q) (target : Fin q)
+    (register : Fin n) (amount : ℤ) (value : ℕ)
+    (arithmetic : (before.counters register : ℤ) + amount = value) :
+    (target, Action.apply (.shift register amount) (naturalState before).2) =
+      naturalState ⟨target, Function.update before.counters register value⟩ := by
+  apply Prod.ext
+  · rfl
+  · funext index
+    by_cases selected : index = register
+    · subst index
+      simpa only [naturalState, Action.apply, Function.update_self] using arithmetic
+    · simp [naturalState, Action.apply, selected]
+
+/-- Compression preserves a complete live source transition on the natural domain. -/
+theorem step_firstReturn (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source)
+    (unit : ∀ edge, Action.UnitShift (source edge).action)
+    {before after : Counter.Configuration n q}
+    (transition : step source (naturalState before) = some (naturalState after)) :
+    FirstReturn basis source deterministic compatible
+      (encode basis source deterministic compatible before)
+      (encode basis source deterministic compatible after) := by
+  obtain ⟨edge, enabled, result⟩ := (step_iff source deterministic).mp transition
+  have at_source : (source edge).source = before.pc := enabled.1
+  cases operation : (source edge).action with
+  | shift register amount =>
+      have elementary : amount = 1 ∨ amount = -1 := by
+        simpa only [operation, Action.UnitShift] using unit edge
+      simp only [Edge.execute, operation] at result
+      rcases elementary with forward | backward
+      · subst amount
+        have shape :
+            ⟨(source edge).target,
+              Function.update before.counters register (before.counters register + 1)⟩ = after := by
+          apply naturalState_injective
+          exact (naturalState_shift before (source edge).target register 1
+            (before.counters register + 1) (by simp)).symm.trans result
+        subst after
+        exact increment_firstReturn basis source deterministic compatible before edge register at_source operation
+      · subst amount
+        have selected : (before.counters register : ℤ) + (-1) = after.counters register := by
+          simpa only [Action.apply, naturalState, Function.update_self] using
+            congrArg (fun state : State n q => state.2 register) result
+        have positive : before.counters register ≠ 0 := by
+          have nonnegative := Int.natCast_nonneg (after.counters register)
+          omega
+        have arithmetic : (before.counters register : ℤ) + (-1) =
+            (before.counters register - 1 : ℕ) := by omega
+        have shape :
+            ⟨(source edge).target,
+              Function.update before.counters register (before.counters register - 1)⟩ = after := by
+          apply naturalState_injective
+          exact (naturalState_shift before (source edge).target register (-1)
+            (before.counters register - 1) arithmetic).symm.trans result
+        subst after
+        exact decrement_firstReturn basis source deterministic compatible before edge register at_source operation positive
+  | test register flag =>
+      simp only [Edge.execute, operation, Action.apply] at result
+      have shape : ⟨(source edge).target, before.counters⟩ = after := by
+        apply naturalState_injective
+        exact result
+      subst after
+      exact test_firstReturn basis source deterministic compatible before edge register flag
+        at_source operation enabled.2
+
+/-- The actual first-return run is positive when its observation is forgotten. -/
+theorem FirstReturn.reaches {basis : PrimeCode.Basis n} {source : Table n q e}
+    {deterministic : Deterministic source} {compatible : TargetCompatible source}
+    {first last : State 2 (size basis source deterministic compatible)}
+    (run : FirstReturn basis source deterministic compatible first last) :
+    StateTransition.Reaches₁ (step (table basis source deterministic compatible)) first last := by
+  obtain ⟨_, _, next, initial, interior⟩ := run
+  exact Relation.TransGen.head' initial
+    (Relation.ReflTransGen.mono (fun _ _ edge => edge.1) _ _ interior)
+
+/-- Ordinary execution is derived from the same exact first return. -/
+theorem step_reaches (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source)
+    (unit : ∀ edge, Action.UnitShift (source edge).action)
+    {before after : Counter.Configuration n q}
+    (transition : step source (naturalState before) = some (naturalState after)) :
+    StateTransition.Reaches₁ (step (table basis source deterministic compatible))
+      (encode basis source deterministic compatible before)
+      (encode basis source deterministic compatible after) :=
+  (step_firstReturn basis source deterministic compatible unit transition).reaches
+
+def toNatural (state : State n q) : Counter.Configuration n q :=
+  ⟨state.1, fun index => (state.2 index).toNat⟩
+
+theorem naturalState_toNatural (state : State n q) (nonnegative : ∀ index, 0 ≤ state.2 index) :
+    naturalState (toNatural state) = state := by
+  apply Prod.ext
+  · rfl
+  · funext index
+    exact Int.toNat_of_nonneg (nonnegative index)
+
+/-- Every live step whose endpoints lie on the natural lattice has an actual positive compression. -/
+theorem integer_step_reaches (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source)
+    (unit : ∀ edge, Action.UnitShift (source edge).action)
+    {first last : State n q} (transition : step source first = some last)
+    (first_natural : ∀ index, 0 ≤ first.2 index) (last_natural : ∀ index, 0 ≤ last.2 index) :
+    StateTransition.Reaches₁ (step (table basis source deterministic compatible))
+      (encode basis source deterministic compatible (toNatural first))
+      (encode basis source deterministic compatible (toNatural last)) := by
+  apply step_reaches basis source deterministic compatible unit
+  rw [naturalState_toNatural first first_natural, naturalState_toNatural last last_natural]
+  exact transition
+
+/-- A source invariant covers every intermediate step, not only the two encoded endpoints. -/
+theorem integer_reaches1 (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source)
+    (unit : ∀ edge, Action.UnitShift (source edge).action)
+    {first last : State n q} (run : StateTransition.Reaches₁ (step source) first last)
+    (natural : ∀ state, StateTransition.Reaches (step source) first state → ∀ index, 0 ≤ state.2 index) :
+    StateTransition.Reaches₁ (step (table basis source deterministic compatible))
+      (encode basis source deterministic compatible (toNatural first))
+      (encode basis source deterministic compatible (toNatural last)) := by
+  induction run with
+  | single transition =>
+      exact integer_step_reaches basis source deterministic compatible unit transition
+        (natural _ Relation.ReflTransGen.refl) (natural _ (Relation.ReflTransGen.single transition))
+  | @tail middle last earlier transition previous =>
+      exact previous.trans (integer_step_reaches basis source deterministic compatible unit transition
+        (natural middle earlier.to_reflTransGen)
+        (natural last (earlier.to_reflTransGen.tail transition)))
+
+/-- Integer source endpoints on the natural lattice retain the exact compiled first return. -/
+theorem integer_step_firstReturn (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source)
+    (unit : ∀ edge, Action.UnitShift (source edge).action)
+    {first last : State n q} (transition : step source first = some last)
+    (first_natural : ∀ index, 0 ≤ first.2 index) (last_natural : ∀ index, 0 ≤ last.2 index) :
+    FirstReturn basis source deterministic compatible
+      (encode basis source deterministic compatible (toNatural first))
+      (encode basis source deterministic compatible (toNatural last)) := by
+  apply step_firstReturn basis source deterministic compatible unit
+  rw [naturalState_toNatural first first_natural, naturalState_toNatural last last_natural]
+  exact transition
+
+/-- A finite marked subset of the retained source-control positions. -/
+def Marked (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source)
+    (mark : Fin q → Bool) (state : State 2 (size basis source deterministic compatible)) : Prop :=
+  ∃ position : Fin q, state.1 = PortNetwork.control (wiring basis source deterministic compatible)
+    (boundary basis source position) ∧ mark position = true
+
+theorem marked_boundary (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source)
+    {mark : Fin q → Bool} {state : State 2 (size basis source deterministic compatible)}
+    (marked : Marked basis source deterministic compatible mark state) :
+    Boundary basis source deterministic compatible state := by
+  obtain ⟨position, equal, _⟩ := marked
+  exact ⟨position, equal⟩
+
+theorem marked_encode_iff (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source)
+    (mark : Fin q → Bool) (state : Counter.Configuration n q) :
+    Marked basis source deterministic compatible mark
+      (encode basis source deterministic compatible state) ↔ mark state.pc = true := by
+  constructor
+  · rintro ⟨position, equal, marked⟩
+    have addresses := boundary_injective basis source
+      (PortNetwork.control_unlinked_injective (wiring basis source deterministic compatible)
+        (boundary_link_none basis source deterministic compatible state.pc)
+        (boundary_link_none basis source deterministic compatible position) equal)
+    rw [addresses]
+    exact marked
+  · exact fun marked => ⟨state.pc, rfl, marked⟩
+
+def InternalMarkedStep (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source) (mark : Fin q → Bool)
+    (first last : State 2 (size basis source deterministic compatible)) : Prop :=
+  step (table basis source deterministic compatible) first = some last ∧
+    ¬ Marked basis source deterministic compatible mark first
+
+abbrev InternalMarkedReaches (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source) (mark : Fin q → Bool) :=
+  Relation.ReflTransGen (InternalMarkedStep basis source deterministic compatible mark)
+
+def MarkedFirstReturn (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source) (mark : Fin q → Bool)
+    (first last : State 2 (size basis source deterministic compatible)) : Prop :=
+  Marked basis source deterministic compatible mark first ∧
+  Marked basis source deterministic compatible mark last ∧
+  ∃ next, step (table basis source deterministic compatible) first = some next ∧
+    InternalMarkedReaches basis source deterministic compatible mark next last
+
+private theorem internal_to_marked (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source) (mark : Fin q → Bool)
+    {first last : State 2 (size basis source deterministic compatible)}
+    (run : InternalReaches basis source deterministic compatible first last) :
+    InternalMarkedReaches basis source deterministic compatible mark first last := by
+  exact Relation.ReflTransGen.mono
+    (fun _ _ edge => ⟨edge.1, fun marked => edge.2 (marked_boundary basis source deterministic compatible marked)⟩)
+    _ _ run
+
+/-- An unmarked source step remains unmarked throughout its entire compiled execution. -/
+theorem integer_unmarked_step (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source)
+    (unit : ∀ edge, Action.UnitShift (source edge).action) (mark : Fin q → Bool)
+    {first last : State n q} (transition : step source first = some last)
+    (unmarked : mark first.1 = false)
+    (first_natural : ∀ index, 0 ≤ first.2 index) (last_natural : ∀ index, 0 ≤ last.2 index) :
+    InternalMarkedReaches basis source deterministic compatible mark
+      (encode basis source deterministic compatible (toNatural first))
+      (encode basis source deterministic compatible (toNatural last)) := by
+  obtain ⟨_, _, next, initial, inside⟩ :=
+    integer_step_firstReturn basis source deterministic compatible unit transition first_natural last_natural
+  apply Relation.ReflTransGen.head (b := next) ?_
+    (internal_to_marked basis source deterministic compatible mark inside)
+  refine ⟨initial, ?_⟩
+  rw [marked_encode_iff]
+  change ¬ mark first.1 = true
+  rw [unmarked]
+  decide
+
+/-- A preserved source invariant covers every intermediate unmarked source step. -/
+theorem integer_internal_reaches (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source)
+    (unit : ∀ edge, Action.UnitShift (source edge).action) (mark : Fin q → Bool)
+    (valid : State n q → Prop) (stable : Stable source valid)
+    (nonnegative : ∀ state, valid state → ∀ index, 0 ≤ state.2 index)
+    {first last : State n q}
+    (run : Relation.ReflTransGen (fun current next : State n q =>
+      step source current = some next ∧ mark current.1 = false) first last)
+    (first_valid : valid first) :
+    InternalMarkedReaches basis source deterministic compatible mark
+      (encode basis source deterministic compatible (toNatural first))
+      (encode basis source deterministic compatible (toNatural last)) := by
+  have lifted : valid last ∧ InternalMarkedReaches basis source deterministic compatible mark
+      (encode basis source deterministic compatible (toNatural first))
+      (encode basis source deterministic compatible (toNatural last)) := by
+    induction run with
+    | refl => exact ⟨first_valid, Relation.ReflTransGen.refl⟩
+    | tail _ edge previous =>
+        have last_valid := stable previous.1 edge.1
+        exact ⟨last_valid, previous.2.trans
+          (integer_unmarked_step basis source deterministic compatible unit mark edge.1 edge.2
+            (nonnegative _ previous.1) (nonnegative _ last_valid))⟩
+  exact lifted.2
+
+/-- A marked source first return has exactly the same complete compressed endpoints. -/
+theorem marked_firstReturn (basis : PrimeCode.Basis n) (source : Table n q e)
+    (deterministic : Deterministic source) (compatible : TargetCompatible source)
+    (unit : ∀ edge, Action.UnitShift (source edge).action) (mark : Fin q → Bool)
+    (valid : State n q → Prop) (stable : Stable source valid)
+    (nonnegative : ∀ state, valid state → ∀ index, 0 ≤ state.2 index)
+    {first middle last : State n q} (initial : step source first = some middle)
+    (rest : Relation.ReflTransGen (fun current next : State n q =>
+      step source current = some next ∧ mark current.1 = false) middle last)
+    (first_marked : mark first.1 = true) (last_marked : mark last.1 = true) (first_valid : valid first) :
+    MarkedFirstReturn basis source deterministic compatible mark
+      (encode basis source deterministic compatible (toNatural first))
+      (encode basis source deterministic compatible (toNatural last)) := by
+  have middle_valid := stable first_valid initial
+  obtain ⟨_, _, next, head, inside⟩ := integer_step_firstReturn basis source deterministic compatible unit
+    initial (nonnegative _ first_valid) (nonnegative _ middle_valid)
+  refine ⟨(marked_encode_iff basis source deterministic compatible mark _).mpr first_marked,
+    (marked_encode_iff basis source deterministic compatible mark _).mpr last_marked,
+    next, head, ?_⟩
+  exact (internal_to_marked basis source deterministic compatible mark inside).trans
+    (integer_internal_reaches basis source deterministic compatible unit mark valid stable nonnegative rest middle_valid)
+
+end Monodromy.Counter.Reversible.PrimeCompression
+
+end
+
+
+/-! Finite source marks on the same native geometric word table. -/
+
+noncomputable section
+
+namespace Monodromy.ReversibleCompilation
+
+open Counter.Reversible CoupledContinuation
+
+variable {q e : ℕ} [NeZero q]
+
+/-- Only source vertices are observed; edge ports carry no source mark. -/
+def markSource (mark : Fin q → Bool) (address : Fin (q + e)) : Bool :=
+  match finSumFinEquiv.symm address with
+  | .inl position => mark position
+  | .inr _ => false
+
+omit [NeZero q] in
+@[simp] theorem markSource_source (mark : Fin q → Bool) (position : Fin q) :
+    markSource (e := e) mark (Fin.castAdd e position) = mark position := by
+  simp [markSource]
+
+/-- The existing native words with a different finite stop table. -/
+def markedProgram (table : Table 2 q e) (deterministic : Deterministic table)
+    (compatible : TargetCompatible table) (mark : Fin q → Bool) : Program (11 * (q + e)) :=
+  StagedProgram.markedCompile 11 (q + e) (stages table deterministic compatible) (markSource mark)
+
+@[simp] theorem markedProgram_advance (table : Table 2 q e) (deterministic : Deterministic table)
+    (compatible : TargetCompatible table) (mark : Fin q → Bool) :
+    (markedProgram table deterministic compatible mark).advance =
+      (haltingProgram table deterministic compatible).advance := rfl
+
+/-- A source return is detected by the actual finite root observation. -/
+def MarkedBoundary (table : Table 2 q e) (deterministic : Deterministic table)
+    (compatible : TargetCompatible table) (mark : Fin q → Bool) (state : Memory) : Prop :=
+  (markedProgram table deterministic compatible mark).haltSignal state = 1
+
+theorem markedBoundary_iota_iff (table : Table 2 q e) (deterministic : Deterministic table)
+    (compatible : TargetCompatible table) (mark : Fin q → Bool) (state : State 2 q) :
+    MarkedBoundary table deterministic compatible mark (iota (e := e) state) ↔ mark state.1 = true := by
+  have observed := StagedProgram.halt_embed_iff 11 (q + e)
+    (stages table deterministic compatible) (markSource mark)
+    (state.2 0) (state.2 1) 0 (Fin.castAdd e state.1) 0
+  simpa only [MarkedBoundary, markedProgram, iota, sourcePoint, point, mul_zero, zero_add,
+    true_and, markSource_source] using observed
+
+private theorem stopped_phase (stages : Fin 11 → Program (q + e)) (bits : Fin (q + e) → Bool)
+    (state : Memory) (stopped : (StagedProgram.markedCompile 11 (q + e) stages bits).haltSignal state = 1) :
+    StagedProgram.PhaseBoundary 11 state := by
+  obtain ⟨⟨base, phase⟩, rfl⟩ := (StagedProgram.packedEquiv 11).surjective state
+  apply (StagedProgram.phaseBoundary_embed_iff 11 phase base).mpr
+  by_contra nonzero
+  have inactive : (StagedProgram.markedCompile 11 (q + e) stages bits).step
+      (StagedProgram.embed 11 phase base) = none := by
+    exact ite_eq_left stopped
+  have active := StagedProgram.interior_step 11 (q + e) stages bits phase nonzero base
+  rw [inactive] at active
+  cases active
+
+theorem markedBoundary_phase (table : Table 2 q e) (deterministic : Deterministic table)
+    (compatible : TargetCompatible table) (mark : Fin q → Bool) {state : Memory}
+    (marked : MarkedBoundary table deterministic compatible mark state) :
+    StagedProgram.PhaseBoundary 11 state :=
+  stopped_phase (stages table deterministic compatible) (markSource mark) state marked
+
+def NativeInternalStep (table : Table 2 q e) (deterministic : Deterministic table)
+    (compatible : TargetCompatible table) (mark : Fin q → Bool) (first last : Memory) : Prop :=
+  (haltingProgram table deterministic compatible).step first = some last ∧
+    ¬ MarkedBoundary table deterministic compatible mark first
+
+abbrev NativeInternalReaches (table : Table 2 q e) (deterministic : Deterministic table)
+    (compatible : TargetCompatible table) (mark : Fin q → Bool) :=
+  Relation.ReflTransGen (NativeInternalStep table deterministic compatible mark)
+
+def NativeFirstReturn (table : Table 2 q e) (deterministic : Deterministic table)
+    (compatible : TargetCompatible table) (mark : Fin q → Bool) (first last : Memory) : Prop :=
+  MarkedBoundary table deterministic compatible mark first ∧
+  MarkedBoundary table deterministic compatible mark last ∧
+  ∃ next, (haltingProgram table deterministic compatible).step first = some next ∧
+    NativeInternalReaches table deterministic compatible mark next last
+
+/-- After departure, one source edge visits no earlier packed phase-zero boundary. -/
+theorem counter_departure (table : Table 2 q e) (deterministic : Deterministic table)
+    (compatible : TargetCompatible table) (mark : Fin q → Bool) {first last : State 2 q}
+    (transition : Counter.Reversible.step table first = some last) :
+    ∃ next, (haltingProgram table deterministic compatible).step (iota (e := e) first) = some next ∧
+      NativeInternalReaches table deterministic compatible mark next (iota (e := e) last) := by
+  let P := haltingProgram table deterministic compatible
+  let initial := iota (e := e) first
+  obtain ⟨cycle, _, _, interior, _⟩ := step_firstReturn table deterministic compatible transition
+  obtain ⟨edge, enabled, _⟩ := (Counter.Reversible.step_iff table deterministic).mp transition
+  have initial_active : P.haltSignal initial ≠ 1 := by
+    intro stopped
+    exact ((haltSignal_iota_iff table deterministic compatible first).mp stopped) ⟨edge, enabled.1⟩
+  have active (round : ℕ) (before : round < 11) :
+      P.step (P.advance^[round] initial) = some (P.advance^[round + 1] initial) := by
+    rw [Function.iterate_succ_apply']
+    apply ite_eq_right
+    by_cases zero : round = 0
+    · subst round
+      exact initial_active
+    · intro stopped
+      exact interior round (by omega) before
+        (stopped_phase (stages table deterministic compatible) (haltMark table)
+          (P.advance^[round] initial) stopped)
+  have unmarked (round : ℕ) (positive : 0 < round) (before : round < 11) :
+      ¬ MarkedBoundary table deterministic compatible mark (P.advance^[round] initial) := by
+    intro marked
+    exact interior round positive before (markedBoundary_phase table deterministic compatible mark marked)
+  have middle (round : ℕ) (bound : round ≤ 10) :
+      NativeInternalReaches table deterministic compatible mark (P.advance initial)
+        (P.advance^[round + 1] initial) := by
+    induction round with
+    | zero => exact Relation.ReflTransGen.refl
+    | succ round previous =>
+        exact (previous (by omega)).tail ⟨active (round + 1) (by omega),
+          unmarked (round + 1) (by omega) (by omega)⟩
+  refine ⟨P.advance initial, ?_, ?_⟩
+  · simpa only [Nat.zero_add, Function.iterate_zero_apply, Function.iterate_one] using active 0 (by decide)
+  · have inside := middle 10 (by decide)
+    rw [cycle] at inside
+    exact inside
+
+/-- An unmarked source instruction executes entirely inside the native marked boundary. -/
+theorem counter_internal_step (table : Table 2 q e) (deterministic : Deterministic table)
+    (compatible : TargetCompatible table) (mark : Fin q → Bool) {first last : State 2 q}
+    (transition : Counter.Reversible.step table first = some last) (unmarked : mark first.1 = false) :
+    NativeInternalReaches table deterministic compatible mark (iota (e := e) first) (iota (e := e) last) := by
+  obtain ⟨next, initial, rest⟩ := counter_departure table deterministic compatible mark transition
+  apply Relation.ReflTransGen.head (b := next) ?_ rest
+  refine ⟨initial, ?_⟩
+  rw [markedBoundary_iota_iff, unmarked]
+  decide
+
+theorem counter_internal_reaches (table : Table 2 q e) (deterministic : Deterministic table)
+    (compatible : TargetCompatible table) (mark : Fin q → Bool) {first last : State 2 q}
+    (run : Relation.ReflTransGen (fun first last : State 2 q =>
+      Counter.Reversible.step table first = some last ∧ mark first.1 = false) first last) :
+    NativeInternalReaches table deterministic compatible mark (iota (e := e) first) (iota (e := e) last) := by
+  induction run with
+  | refl => exact Relation.ReflTransGen.refl
+  | tail _ edge previous =>
+      exact previous.trans (counter_internal_step table deterministic compatible mark edge.1 edge.2)
+
+/-- A finite marked counter return is the corresponding first native marked return. -/
+theorem marked_firstReturn (table : Table 2 q e) (deterministic : Deterministic table)
+    (compatible : TargetCompatible table) (mark : Fin q → Bool) {first middle last : State 2 q}
+    (initial : Counter.Reversible.step table first = some middle)
+    (rest : Relation.ReflTransGen (fun first last : State 2 q =>
+      Counter.Reversible.step table first = some last ∧ mark first.1 = false) middle last)
+    (first_marked : mark first.1 = true) (last_marked : mark last.1 = true) :
+    NativeFirstReturn table deterministic compatible mark (iota (e := e) first) (iota (e := e) last) := by
+  obtain ⟨next, head, inside⟩ := counter_departure table deterministic compatible mark initial
+  exact ⟨(markedBoundary_iota_iff table deterministic compatible mark first).mpr first_marked,
+    (markedBoundary_iota_iff table deterministic compatible mark last).mpr last_marked,
+    next, head, inside.trans (counter_internal_reaches table deterministic compatible mark rest)⟩
+
+/-- The marked evaluator retains the original words on every unmarked original step. -/
+theorem marked_step_of_original (table : Table 2 q e) (deterministic : Deterministic table)
+    (compatible : TargetCompatible table) (mark : Fin q → Bool) {first last : Memory}
+    (transition : (haltingProgram table deterministic compatible).step first = some last)
+    (unmarked : ¬ MarkedBoundary table deterministic compatible mark first) :
+    (markedProgram table deterministic compatible mark).step first = some last := by
+  change (if (markedProgram table deterministic compatible mark).haltSignal first = 1 then none
+    else some ((markedProgram table deterministic compatible mark).advance first)) = some last
+  change (markedProgram table deterministic compatible mark).haltSignal first ≠ 1 at unmarked
+  rw [ite_eq_right unmarked, markedProgram_advance]
+  unfold Program.step at transition
+  split_ifs at transition
+  exact transition
+
+theorem internal_marked_reaches (table : Table 2 q e) (deterministic : Deterministic table)
+    (compatible : TargetCompatible table) (mark : Fin q → Bool) {first last : Memory}
+    (run : NativeInternalReaches table deterministic compatible mark first last) :
+    StateTransition.Reaches (markedProgram table deterministic compatible mark).step first last := by
+  induction run with
+  | refl => exact Relation.ReflTransGen.refl
+  | tail _ edge previous =>
+      exact previous.tail (marked_step_of_original table deterministic compatible mark edge.1 edge.2)
+
+/-- Execute the original native table once, then the same words until the next finite root mark. -/
+def nativeMacro (table : Table 2 q e) (deterministic : Deterministic table)
+    (compatible : TargetCompatible table) (mark : Fin q → Bool) (state : Memory) : Part (Option Memory) :=
+  match (haltingProgram table deterministic compatible).step state with
+  | none => Part.some none
+  | some next => ((markedProgram table deterministic compatible mark).eval next).map some
+
+theorem nativeMacro_of_halt (table : Table 2 q e) (deterministic : Deterministic table)
+    (compatible : TargetCompatible table) (mark : Fin q → Bool) (state : Memory)
+    (halted : (haltingProgram table deterministic compatible).step state = none) :
+    nativeMacro table deterministic compatible mark state = Part.some none := by
+  rw [nativeMacro, halted]
+
+theorem nativeMacro_of_firstReturn (table : Table 2 q e) (deterministic : Deterministic table)
+    (compatible : TargetCompatible table) (mark : Fin q → Bool) {first last : Memory}
+    (run : NativeFirstReturn table deterministic compatible mark first last) :
+    nativeMacro table deterministic compatible mark first = Part.some (some last) := by
+  obtain ⟨_, marked, next, head, rest⟩ := run
+  have completed : (markedProgram table deterministic compatible mark).eval next = Part.some last := by
+    apply Part.eq_some_iff.mpr
+    exact StateTransition.mem_eval.mpr ⟨internal_marked_reaches table deterministic compatible mark rest,
+      ite_eq_left marked⟩
+  simp only [nativeMacro, head, completed, Part.map_some]
+
+end Monodromy.ReversibleCompilation
+
+end

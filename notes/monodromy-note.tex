@@ -35,17 +35,21 @@
 \maketitle
 \thispagestyle{draftfirst}
 \begin{abstract}
-We construct a three-root computer from successive logarithmic lifts
-and finite analytic path selection. Five fixed loops yield memory
-shifts and conditional writes. A Lean-verified simulation preserves
-complete Turing configurations, termination, and divergence.
+We construct a Turing-complete computational model using monodromy and 
+successive path lifting through covering spaces.
+The monodromy actions of five fixed loops produce memory shifts and 
+conditional writes, while finite analytic path selection 
+organizes these operations into programs. A Lean-verified simulation 
+preserves complete Turing-machine configurations, termination, and 
+divergence.
 \end{abstract}
 
 \section{Introduction}
 
 A closed path can return to its base point while changing an analytic
-branch. Can this retained change also determine the next operation?
-
+branch (e.g., continuing $\log z$ from $z=1$ once counterclockwise
+around the origin returns to $z=1$ with the value changing from
+$0$ to $2\pi i$).
 The construction turns winding into a zero-conditional write by
 successive logarithmic lifts in one coupled covering, then combines
 these operations with finite analytic routing and classical counter

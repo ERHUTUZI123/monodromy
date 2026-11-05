@@ -38,16 +38,19 @@ lake build
 lake env lean -DautoImplicit=false -DwarningAsError=true src/Audit.lean
 ```
 
-The actual ZIP was checked in a new directory on macOS 15.4.1 (arm64),
+The pinned proof tree was checked in a new directory on macOS 15.4.1 (arm64),
 with Lean 4.35.0 and a fresh project build. The nine external dependency
 checkouts and their build caches were shared through `.lake/packages`;
 all revisions matched the lockfile. The three commands passed: 3071 Lake
 jobs and a strict audit of 1531 Monodromy declarations using only the
-standard Lean axioms. Every page of the final PDF was rendered and inspected.
+standard Lean axioms. The refreshed PDF was rendered and inspected on all
+seven pages. The new ZIP preserves those 21 source/build files byte for byte;
+its member paths, CRCs, source fingerprint, and exact PDF bytes were rechecked.
 
-The numbered Lean companions in this directory remain navigation copies
-of the same frozen sources. Active research in `src/Monodromy/` advances
-independently; the review package fixes the proof version used by this note.
+The review package fixes the proof version used by this note. Active research
+in `src/Monodromy/` advances independently. Earlier numbered navigation copies
+are preserved in the [research history](../docs/history.zip); the package uses
+the original module names.
 
 To compile the standalone manuscript from this repository's root:
 

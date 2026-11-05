@@ -716,3 +716,948 @@ theorem native_universality (machine : TM0.Machine (Fin a) (Fin q)) :
     fun _ _ run => finite_run_path a q machine run⟩
 
 end Monodromy.NativeTuring
+
+/-!
+## Universal simulation with recoverable history
+
+The ordinary two-counter compilation supplies only the source to be made
+reversible. A fixed finite recording graph executes it, retaining the complete
+configuration and history. Its four source registers are a proof intermediate;
+reversibility-preserving compression to two native memory roots is separate.
+-/
+
+namespace Monodromy.RecordedTuring
+
+open Turing
+
+noncomputable section
+
+variable (a q : ℕ) [NeZero a] [NeZero q]
+
+abbrev size (machine : TM0.Machine (Fin a) (Fin q)) : ℕ :=
+  Counter.Compression.size (NativeTuring.source3 a q machine)
+
+def counterEncode (machine : TM0.Machine (Fin a) (Fin q))
+    (state : TM0.Cfg (Fin a) (Fin q)) : Counter.Configuration 2 (size a q machine) :=
+  Counter.Compression.encode (NativeTuring.source3 a q machine)
+    (Counter.TuringCompiler.encode a q state)
+
+theorem counterEncode_injective (machine : TM0.Machine (Fin a) (Fin q)) :
+    Function.Injective (counterEncode a q machine) :=
+  (Counter.Compression.encode_injective (NativeTuring.source3 a q machine)).comp
+    (Counter.TuringCompiler.encode_injective a q)
+
+theorem counter_halt (machine : TM0.Machine (Fin a) (Fin q))
+    (state : TM0.Cfg (Fin a) (Fin q)) (halted : TM0.step machine state = none) :
+    Counter.step (NativeTuring.source2 a q machine) (counterEncode a q machine state) = none := by
+  have first := (Counter.TuringCompiler.halt_encode a q machine state).mpr halted
+  exact (Counter.Compression.halt_encode (NativeTuring.source3 a q machine)
+    (Counter.TuringCompiler.encode a q state)).mpr first
+
+end
+
+end Monodromy.RecordedTuring
+
+namespace Monodromy.ReversibleTuring
+
+open Turing
+
+noncomputable section
+
+variable (a q : ℕ) [NeZero a] [NeZero q]
+
+/-- A fixed finite reversible graph realizes the source; its four registers are an intermediate code. -/
+def table (machine : TM0.Machine (Fin a) (Fin q)) :
+    Counter.Reversible.Table 4
+      (Counter.Reversible.Recording.size (RecordedTuring.size a q machine))
+      (Counter.Reversible.Recording.edges (NativeTuring.source2 a q machine)) :=
+  Counter.Reversible.Recording.table (NativeTuring.source2 a q machine)
+
+def encode (machine : TM0.Machine (Fin a) (Fin q))
+    (state : TM0.Cfg (Fin a) (Fin q)) (history : ℕ) :
+    Counter.Reversible.State 4
+      (Counter.Reversible.Recording.size (RecordedTuring.size a q machine)) :=
+  Counter.Reversible.Recording.encode (RecordedTuring.counterEncode a q machine state) history
+
+/-- At every simulated boundary the history is retained and its working register is zero. -/
+theorem boundary_storage (machine : TM0.Machine (Fin a) (Fin q))
+    (state : TM0.Cfg (Fin a) (Fin q)) (history : ℕ) :
+    ((encode a q machine state history).2 (Counter.Reversible.Recording.historyRegister 2 0),
+      (encode a q machine state history).2 (Counter.Reversible.Recording.historyRegister 2 1)) =
+        ((history : ℤ), 0) := by
+  simp only [encode, Counter.Reversible.Recording.encode, Counter.Reversible.Recording.framed,
+    Counter.Reversible.Recording.frame_history, Counter.Reversible.Recording.frame_workspace]
+
+theorem encode_injective (machine : TM0.Machine (Fin a) (Fin q)) :
+    Function.Injective (fun pair : TM0.Cfg (Fin a) (Fin q) × ℕ =>
+      encode a q machine pair.1 pair.2) := by
+  intro first second same
+  have logged : (RecordedTuring.counterEncode a q machine first.1, first.2) =
+      (RecordedTuring.counterEncode a q machine second.1, second.2) := by
+    apply Counter.Reversible.Recording.embed_injective
+    exact same
+  exact Prod.ext
+    (RecordedTuring.counterEncode_injective a q machine (congrArg Prod.fst logged))
+    (congrArg (fun state : Counter.Recorded.State 2 (RecordedTuring.size a q machine) => state.2) logged)
+
+/-- Every defined graph step has a unique predecessor, including states outside the encoded domain. -/
+theorem defined_step_injective (machine : TM0.Machine (Fin a) (Fin q))
+    {first second last : Counter.Reversible.State 4
+      (Counter.Reversible.Recording.size (RecordedTuring.size a q machine))}
+    (left : Counter.Reversible.step (table a q machine) first = some last)
+    (right : Counter.Reversible.step (table a q machine) second = some last) : first = second :=
+  Counter.Reversible.step_some_injective (table a q machine)
+    (Counter.Reversible.Recording.deterministic (NativeTuring.source2 a q machine))
+    (Counter.Reversible.Recording.targetCompatible (NativeTuring.source2 a q machine)) left right
+
+/-- The compiled machine's finite dispatch marks are lifted to recording ports. -/
+def Boundary (machine : TM0.Machine (Fin a) (Fin q))
+    (state : Counter.Reversible.State 4
+      (Counter.Reversible.Recording.size (RecordedTuring.size a q machine))) : Prop :=
+  Counter.Reversible.Recording.Marked (NativeTuring.counterMark a q machine) state
+
+instance boundary_decidable (machine : TM0.Machine (Fin a) (Fin q))
+    (state : Counter.Reversible.State 4
+      (Counter.Reversible.Recording.size (RecordedTuring.size a q machine))) :
+    Decidable (Boundary a q machine state) := by
+  unfold Boundary
+  infer_instance
+
+private theorem source_marked (machine : TM0.Machine (Fin a) (Fin q))
+    (state : TM0.Cfg (Fin a) (Fin q)) :
+    NativeTuring.counterMark a q machine (RecordedTuring.counterEncode a q machine state).pc = true := by
+  unfold RecordedTuring.counterEncode NativeTuring.counterMark
+  exact @decide_eq_true _ (by unfold NativeTuring.CounterMarked; infer_instance)
+    ((NativeTuring.counterMarked_encode3_iff a q machine
+    (Counter.TuringCompiler.encode a q state)).mpr
+      (Counter.TuringCompiler.encode_boundary a q state))
+
+theorem boundary_encode (machine : TM0.Machine (Fin a) (Fin q))
+    (state : TM0.Cfg (Fin a) (Fin q)) (history : ℕ) :
+    Boundary a q machine (encode a q machine state history) :=
+  (Counter.Reversible.Recording.marked_encode_iff (NativeTuring.counterMark a q machine)
+    (RecordedTuring.counterEncode a q machine state) history).mpr (source_marked a q machine state)
+
+/-- A live Turing step is the first positive return to its finite marked dispatches. -/
+theorem step_firstReturn (machine : TM0.Machine (Fin a) (Fin q))
+    {first last : TM0.Cfg (Fin a) (Fin q)} (transition : TM0.step machine first = some last)
+    (history : ℕ) :
+    ∃ finalHistory, history < finalHistory ∧
+      Counter.Reversible.Recording.MarkedFirstReturn (NativeTuring.source2 a q machine)
+        (NativeTuring.counterMark a q machine)
+        (encode a q machine first history) (encode a q machine last finalHistory) := by
+  obtain ⟨middle, initial, rest⟩ := NativeTuring.counter_firstReturn a q machine transition
+  have internal : Relation.ReflTransGen
+      (fun current next : Counter.Configuration 2 (RecordedTuring.size a q machine) =>
+        Counter.step (NativeTuring.source2 a q machine) current = some next ∧
+          NativeTuring.counterMark a q machine current.pc = false)
+      middle (RecordedTuring.counterEncode a q machine last) := by
+    refine Relation.ReflTransGen.mono (r := NativeTuring.CounterInternalStep a q machine)
+      (fun current next edge => ?_) _ _ rest
+    exact ⟨edge.1, by simpa only
+      [NativeTuring.counterMark, decide_eq_false_iff_not] using edge.2⟩
+  exact Counter.Reversible.Recording.marked_firstReturn (NativeTuring.source2 a q machine)
+    (NativeTuring.counterMark a q machine) initial internal
+    (source_marked a q machine first) (source_marked a q machine last) history
+
+/-- Each live Turing step runs the fixed graph and leaves a larger recoverable history. -/
+theorem step_reaches (machine : TM0.Machine (Fin a) (Fin q))
+    {first last : TM0.Cfg (Fin a) (Fin q)} (transition : TM0.step machine first = some last)
+    (history : ℕ) :
+    ∃ finalHistory, history < finalHistory ∧
+      StateTransition.Reaches₁ (Counter.Reversible.step (table a q machine))
+        (encode a q machine first history) (encode a q machine last finalHistory) := by
+  obtain ⟨finalHistory, grew, _, _, next, initial, interior⟩ :=
+    step_firstReturn a q machine transition history
+  exact ⟨finalHistory, grew, Relation.TransGen.head' initial
+    (Relation.ReflTransGen.mono (fun _ _ edge => edge.1) _ _ interior)⟩
+
+theorem step_halt (machine : TM0.Machine (Fin a) (Fin q))
+    (state : TM0.Cfg (Fin a) (Fin q)) (history : ℕ) (halted : TM0.step machine state = none) :
+    Counter.Reversible.step (table a q machine) (encode a q machine state history) = none :=
+  (Counter.Reversible.Recording.step_encode_none_iff (NativeTuring.source2 a q machine)
+    (RecordedTuring.counterEncode a q machine state) history).mpr
+      (RecordedTuring.counter_halt a q machine state halted)
+
+/-- The same graph is stopped at the chosen finite dispatch marks. -/
+def boundaryTransition (machine : TM0.Machine (Fin a) (Fin q))
+    (state : Counter.Reversible.State 4
+      (Counter.Reversible.Recording.size (RecordedTuring.size a q machine))) :=
+  if Boundary a q machine state then none else Counter.Reversible.step (table a q machine) state
+
+private theorem boundaryTransition_stops (machine : TM0.Machine (Fin a) (Fin q))
+    {state : Counter.Reversible.State 4
+      (Counter.Reversible.Recording.size (RecordedTuring.size a q machine))}
+    (marked : Boundary a q machine state) : boundaryTransition a q machine state = none := by
+  simp only [boundaryTransition, ite_eq_left marked]
+
+private theorem internal_marked_reaches (machine : TM0.Machine (Fin a) (Fin q))
+    {first last : Counter.Reversible.State 4
+      (Counter.Reversible.Recording.size (RecordedTuring.size a q machine))}
+    (run : Counter.Reversible.Recording.InternalMarkedReaches
+      (NativeTuring.source2 a q machine) (NativeTuring.counterMark a q machine) first last) :
+    StateTransition.Reaches (boundaryTransition a q machine) first last := by
+  induction run with
+  | refl => exact Relation.ReflTransGen.refl
+  | @tail first last _ edge previous =>
+      apply previous.tail
+      change (if Boundary a q machine first then none
+        else Counter.Reversible.step (table a q machine) first) = some last
+      have unmarked : ¬ Boundary a q machine first := edge.2
+      rw [ite_eq_right unmarked]
+      exact edge.1
+
+/-- Execute the fixed graph once, then stop it at a finite control mark or a graph dead end. -/
+def macroStep (machine : TM0.Machine (Fin a) (Fin q))
+    (state : Counter.Reversible.State 4
+      (Counter.Reversible.Recording.size (RecordedTuring.size a q machine))) :
+    Part (Option (Counter.Reversible.State 4
+      (Counter.Reversible.Recording.size (RecordedTuring.size a q machine)))) :=
+  match Counter.Reversible.step (table a q machine) state with
+  | none => Part.some none
+  | some next => (StateTransition.eval (boundaryTransition a q machine) next).map some
+
+theorem macroStep_halt (machine : TM0.Machine (Fin a) (Fin q))
+    (state : TM0.Cfg (Fin a) (Fin q)) (history : ℕ) (halted : TM0.step machine state = none) :
+    macroStep a q machine (encode a q machine state history) = Part.some none := by
+  rw [macroStep, step_halt a q machine state history halted]
+
+/-- The causal marked-return evaluator executes exactly the source step, retaining its new history. -/
+theorem macroStep_live (machine : TM0.Machine (Fin a) (Fin q))
+    {first last : TM0.Cfg (Fin a) (Fin q)} (transition : TM0.step machine first = some last)
+    (history : ℕ) :
+    ∃ finalHistory, history < finalHistory ∧
+      macroStep a q machine (encode a q machine first history) =
+        Part.some (some (encode a q machine last finalHistory)) := by
+  obtain ⟨finalHistory, grew, _, marked, next, initial, rest⟩ :=
+    step_firstReturn a q machine transition history
+  have completed : StateTransition.eval (boundaryTransition a q machine) next =
+      Part.some (encode a q machine last finalHistory) := by
+    apply Part.eq_some_iff.mpr
+    exact StateTransition.mem_eval.mpr
+      ⟨internal_marked_reaches a q machine rest, boundaryTransition_stops a q machine marked⟩
+  refine ⟨finalHistory, grew, ?_⟩
+  change Counter.Reversible.step (table a q machine) (encode a q machine first history) =
+    some next at initial
+  simp only [macroStep, initial, completed, Part.map_some]
+
+/-- The optional source result and full recorded configuration agree under the defined graph macro. -/
+theorem macroStep_encode (machine : TM0.Machine (Fin a) (Fin q))
+    (state : TM0.Cfg (Fin a) (Fin q)) (history : ℕ) :
+    ∃ finalHistory,
+      macroStep a q machine (encode a q machine state history) =
+        Part.some ((TM0.step machine state).map (fun next => encode a q machine next finalHistory)) ∧
+      (TM0.step machine state ≠ none → history < finalHistory) := by
+  cases transition : TM0.step machine state with
+  | none =>
+      refine ⟨history, ?_, ?_⟩
+      · simpa only [transition, Option.map_none] using macroStep_halt a q machine state history transition
+      · simp
+  | some next =>
+      obtain ⟨finalHistory, grew, result⟩ := macroStep_live a q machine transition history
+      exact ⟨finalHistory, result, fun _ => grew⟩
+
+def Related (machine : TM0.Machine (Fin a) (Fin q))
+    (original : TM0.Cfg (Fin a) (Fin q))
+    (compiled : Counter.Reversible.State 4
+      (Counter.Reversible.Recording.size (RecordedTuring.size a q machine))) : Prop :=
+  ∃ history, encode a q machine original history = compiled
+
+theorem respects (machine : TM0.Machine (Fin a) (Fin q)) :
+    StateTransition.Respects (TM0.step machine) (Counter.Reversible.step (table a q machine))
+      (Related a q machine) := by
+  intro original compiled related
+  obtain ⟨history, rfl⟩ := related
+  cases transition : TM0.step machine original with
+  | none => exact step_halt a q machine original history transition
+  | some next =>
+      obtain ⟨finalHistory, _, run⟩ := step_reaches a q machine transition history
+      exact ⟨encode a q machine next finalHistory, ⟨finalHistory, rfl⟩, run⟩
+
+theorem halting_iff (machine : TM0.Machine (Fin a) (Fin q))
+    (state : TM0.Cfg (Fin a) (Fin q)) (history : ℕ) :
+    (Counter.Reversible.eval (table a q machine) (encode a q machine state history)).Dom ↔
+      (StateTransition.eval (TM0.step machine) state).Dom :=
+  StateTransition.tr_eval_dom (respects a q machine) ⟨history, rfl⟩
+
+theorem divergence_iff (machine : TM0.Machine (Fin a) (Fin q))
+    (state : TM0.Cfg (Fin a) (Fin q)) (history : ℕ) :
+    ¬ (Counter.Reversible.eval (table a q machine) (encode a q machine state history)).Dom ↔
+      ¬ (StateTransition.eval (TM0.step machine) state).Dom :=
+  not_congr (halting_iff a q machine state history)
+
+/-- The entire final Turing configuration is retained, while the terminal history remains observable. -/
+theorem result_iff (machine : TM0.Machine (Fin a) (Fin q))
+    (first last : TM0.Cfg (Fin a) (Fin q)) (history : ℕ) :
+    (∃ finalHistory, encode a q machine last finalHistory ∈
+      Counter.Reversible.eval (table a q machine) (encode a q machine first history)) ↔
+      last ∈ StateTransition.eval (TM0.step machine) first := by
+  constructor
+  · rintro ⟨finalHistory, finished⟩
+    obtain ⟨source, ⟨sourceHistory, related⟩, source_finished⟩ :=
+      StateTransition.tr_eval_rev (respects a q machine) ⟨history, rfl⟩ finished
+    have same : (source, sourceHistory) = (last, finalHistory) :=
+      @encode_injective a q _ _ machine (source, sourceHistory) (last, finalHistory) related
+    have configurations : source = last := congrArg Prod.fst same
+    simpa only [configurations] using source_finished
+  · intro source_finished
+    obtain ⟨final, ⟨finalHistory, rfl⟩, finished⟩ :=
+      StateTransition.tr_eval (respects a q machine) ⟨history, rfl⟩ source_finished
+    exact ⟨finalHistory, finished⟩
+
+/-- Reverse execution is generated by the reversed finite graph rather than by a supplied trace. -/
+theorem step_retraces (machine : TM0.Machine (Fin a) (Fin q))
+    {first last : TM0.Cfg (Fin a) (Fin q)} (transition : TM0.step machine first = some last)
+    (history : ℕ) :
+    ∃ finalHistory, history < finalHistory ∧
+      StateTransition.Reaches
+        (Counter.Reversible.step (Counter.Reversible.reverseTable (table a q machine)))
+        (encode a q machine last finalHistory) (encode a q machine first history) := by
+  obtain ⟨finalHistory, grew, run⟩ := step_reaches a q machine transition history
+  refine ⟨finalHistory, grew, ?_⟩
+  exact Counter.Reversible.reaches_reverse (table a q machine)
+    (Counter.Reversible.Recording.deterministic (NativeTuring.source2 a q machine))
+    (Counter.Reversible.Recording.targetCompatible (NativeTuring.source2 a q machine)) run.to_reflTransGen
+
+end
+
+end Monodromy.ReversibleTuring
+
+/-!
+## Recoverable-history simulation on two counters
+-/
+
+noncomputable section
+
+namespace Monodromy.ReversibleTuring.Compression
+
+open Turing Counter.Reversible
+
+/-- Four source registers use one instance of the uniform finite prime code. -/
+def basis : PrimeCode.Basis 4 where
+  prime := ![2, 3, 5, 7]
+  isPrime := by intro index; fin_cases index <;> decide
+  distinct := by
+    intro first second same
+    fin_cases first <;> fin_cases second <;> simp_all
+
+variable (a q : ℕ) [NeZero a] [NeZero q]
+
+theorem source_deterministic (machine : TM0.Machine (Fin a) (Fin q)) :
+    Deterministic (ReversibleTuring.table a q machine) :=
+  Recording.deterministic (NativeTuring.source2 a q machine)
+
+theorem source_targetCompatible (machine : TM0.Machine (Fin a) (Fin q)) :
+    TargetCompatible (ReversibleTuring.table a q machine) :=
+  Recording.targetCompatible (NativeTuring.source2 a q machine)
+
+abbrev size (machine : TM0.Machine (Fin a) (Fin q)) : ℕ :=
+  PrimeCompression.size basis (ReversibleTuring.table a q machine)
+    (source_deterministic a q machine) (source_targetCompatible a q machine)
+
+abbrev edges (machine : TM0.Machine (Fin a) (Fin q)) : ℕ :=
+  PrimeCompression.rawEdges basis (ReversibleTuring.table a q machine)
+
+/-- A fixed finite graph on two counters, with no source-step interpreter in its definition. -/
+def table (machine : TM0.Machine (Fin a) (Fin q)) : Table 2 (size a q machine) (edges a q machine) :=
+  PrimeCompression.table basis (ReversibleTuring.table a q machine)
+    (source_deterministic a q machine) (source_targetCompatible a q machine)
+
+/-- The entire source configuration and its recoverable history are retained. -/
+def encode (machine : TM0.Machine (Fin a) (Fin q))
+    (state : TM0.Cfg (Fin a) (Fin q)) (history : ℕ) : State 2 (size a q machine) :=
+  PrimeCompression.encode basis (ReversibleTuring.table a q machine)
+    (source_deterministic a q machine) (source_targetCompatible a q machine)
+    (PrimeCompression.toNatural (ReversibleTuring.encode a q machine state history))
+
+theorem deterministic (machine : TM0.Machine (Fin a) (Fin q)) :
+    Deterministic (table a q machine) :=
+  PrimeCompression.deterministic basis (ReversibleTuring.table a q machine)
+    (source_deterministic a q machine) (source_targetCompatible a q machine)
+
+theorem targetCompatible (machine : TM0.Machine (Fin a) (Fin q)) :
+    TargetCompatible (table a q machine) :=
+  PrimeCompression.targetCompatible basis (ReversibleTuring.table a q machine)
+    (source_deterministic a q machine) (source_targetCompatible a q machine)
+
+private theorem source_nonnegative (machine : TM0.Machine (Fin a) (Fin q))
+    (state : TM0.Cfg (Fin a) (Fin q)) (history : ℕ) :
+    ∀ index, 0 ≤ (ReversibleTuring.encode a q machine state history).2 index := by
+  intro index
+  exact Recording.encode_reaches_nonnegative (NativeTuring.source2 a q machine)
+    (RecordedTuring.counterEncode a q machine state) history Relation.ReflTransGen.refl index
+
+theorem encode_injective (machine : TM0.Machine (Fin a) (Fin q)) :
+    Function.Injective (fun pair : TM0.Cfg (Fin a) (Fin q) × ℕ =>
+      encode a q machine pair.1 pair.2) := by
+  intro first second same
+  have natural := PrimeCompression.encode_injective basis (ReversibleTuring.table a q machine)
+    (source_deterministic a q machine) (source_targetCompatible a q machine) same
+  have original := congrArg PrimeCompression.naturalState natural
+  rw [PrimeCompression.naturalState_toNatural _ (source_nonnegative a q machine first.1 first.2),
+    PrimeCompression.naturalState_toNatural _ (source_nonnegative a q machine second.1 second.2)] at original
+  exact ReversibleTuring.encode_injective a q machine original
+
+/-- Local reversibility holds on every integer state of the compressed graph. -/
+theorem defined_step_injective (machine : TM0.Machine (Fin a) (Fin q))
+    {first second last : State 2 (size a q machine)}
+    (left : step (table a q machine) first = some last)
+    (right : step (table a q machine) second = some last) : first = second :=
+  step_some_injective (table a q machine) (deterministic a q machine)
+    (targetCompatible a q machine) left right
+
+/-- The original recording boundary depends only on its finite control position. -/
+def sourceMark (machine : TM0.Machine (Fin a) (Fin q))
+    (position : Fin (Recording.size (RecordedTuring.size a q machine))) : Bool :=
+  decide (Recording.Marked (n := 2) (NativeTuring.counterMark a q machine)
+    (position, fun _ => 0))
+
+theorem sourceMark_true_iff (machine : TM0.Machine (Fin a) (Fin q))
+    (state : State 4 (Recording.size (RecordedTuring.size a q machine))) :
+    sourceMark a q machine state.1 = true ↔ ReversibleTuring.Boundary a q machine state := by
+  change decide (Recording.Marked (n := 2) (NativeTuring.counterMark a q machine)
+    (state.1, fun _ => 0)) = true ↔
+      Recording.Marked (n := 2) (NativeTuring.counterMark a q machine) (state.1, fun _ => 0)
+  exact ⟨of_decide_eq_true, decide_eq_true⟩
+
+theorem sourceMark_false_iff (machine : TM0.Machine (Fin a) (Fin q))
+    (state : State 4 (Recording.size (RecordedTuring.size a q machine))) :
+    sourceMark a q machine state.1 = false ↔ ¬ ReversibleTuring.Boundary a q machine state := by
+  rw [← sourceMark_true_iff a q machine state]
+  cases sourceMark a q machine state.1 <;> decide
+
+/-- Marked source boundaries inside the actual compressed control graph. -/
+def Boundary (machine : TM0.Machine (Fin a) (Fin q))
+    (state : State 2 (size a q machine)) : Prop :=
+  PrimeCompression.Marked basis (ReversibleTuring.table a q machine)
+    (source_deterministic a q machine) (source_targetCompatible a q machine)
+    (sourceMark a q machine) state
+
+instance boundary_decidable (machine : TM0.Machine (Fin a) (Fin q))
+    (state : State 2 (size a q machine)) : Decidable (Boundary a q machine state) := by
+  unfold Boundary PrimeCompression.Marked
+  refine @Fintype.decidableExistsFintype
+    (Fin (Recording.size (RecordedTuring.size a q machine))) _ ?_ inferInstance
+  intro position
+  dsimp only
+  exact @instDecidableAnd _ _ (instDecidableEqFin _ _ _) (instDecidableEqBool _ _)
+
+/-- The marker used by a native finite-root table has no memory input. -/
+def mark (machine : TM0.Machine (Fin a) (Fin q)) (position : Fin (size a q machine)) : Bool :=
+  decide (Boundary a q machine (position, fun _ => 0))
+
+theorem mark_true_iff (machine : TM0.Machine (Fin a) (Fin q))
+    (state : State 2 (size a q machine)) :
+    mark a q machine state.1 = true ↔ Boundary a q machine state := by
+  change decide (Boundary a q machine (state.1, fun _ => 0)) = true ↔
+    Boundary a q machine (state.1, fun _ => 0)
+  exact ⟨of_decide_eq_true, decide_eq_true⟩
+
+theorem mark_false_iff (machine : TM0.Machine (Fin a) (Fin q))
+    (state : State 2 (size a q machine)) :
+    mark a q machine state.1 = false ↔ ¬ Boundary a q machine state := by
+  rw [← mark_true_iff a q machine state]
+  cases mark a q machine state.1 <;> decide
+
+theorem boundary_encode (machine : TM0.Machine (Fin a) (Fin q))
+    (state : TM0.Cfg (Fin a) (Fin q)) (history : ℕ) :
+    Boundary a q machine (encode a q machine state history) := by
+  apply (PrimeCompression.marked_encode_iff basis (ReversibleTuring.table a q machine)
+    (source_deterministic a q machine) (source_targetCompatible a q machine)
+    (sourceMark a q machine) _).mpr
+  exact (sourceMark_true_iff a q machine (ReversibleTuring.encode a q machine state history)).mpr
+    (ReversibleTuring.boundary_encode a q machine state history)
+
+/-- Each live Turing step reaches its next marked boundary with the same retained history. -/
+theorem step_firstReturn (machine : TM0.Machine (Fin a) (Fin q))
+    {first last : TM0.Cfg (Fin a) (Fin q)} (transition : TM0.step machine first = some last)
+    (history : ℕ) :
+    ∃ finalHistory, history < finalHistory ∧
+      PrimeCompression.MarkedFirstReturn basis (ReversibleTuring.table a q machine)
+        (source_deterministic a q machine) (source_targetCompatible a q machine)
+        (sourceMark a q machine)
+        (encode a q machine first history) (encode a q machine last finalHistory) := by
+  obtain ⟨finalHistory, grew, first_marked, last_marked, middle, initial, rest⟩ :=
+    ReversibleTuring.step_firstReturn a q machine transition history
+  have source_rest : Relation.ReflTransGen
+      (fun current next : State 4 (Recording.size (RecordedTuring.size a q machine)) =>
+        step (ReversibleTuring.table a q machine) current = some next ∧
+          sourceMark a q machine current.1 = false)
+      middle (ReversibleTuring.encode a q machine last finalHistory) := by
+    exact Relation.ReflTransGen.mono
+      (fun current _ edge => ⟨edge.1, (sourceMark_false_iff a q machine current).mpr edge.2⟩)
+      _ _ rest
+  have first_valid : Recording.Valid (NativeTuring.source2 a q machine)
+      (ReversibleTuring.encode a q machine first history) :=
+    Recording.valid_encode (NativeTuring.source2 a q machine)
+      (RecordedTuring.counterEncode a q machine first) history
+  have actual := PrimeCompression.marked_firstReturn basis (ReversibleTuring.table a q machine)
+    (source_deterministic a q machine) (source_targetCompatible a q machine)
+    (Recording.unitShift (NativeTuring.source2 a q machine)) (sourceMark a q machine)
+    (Recording.Valid (NativeTuring.source2 a q machine))
+    (Recording.stable (NativeTuring.source2 a q machine))
+    (Recording.valid_nonnegative (NativeTuring.source2 a q machine)) initial source_rest
+    ((sourceMark_true_iff a q machine (ReversibleTuring.encode a q machine first history)).mpr first_marked)
+    ((sourceMark_true_iff a q machine (ReversibleTuring.encode a q machine last finalHistory)).mpr last_marked)
+    first_valid
+  exact ⟨finalHistory, grew, actual⟩
+
+/-- Every Turing step runs the two-counter table with the same strictly growing history. -/
+theorem step_reaches (machine : TM0.Machine (Fin a) (Fin q))
+    {first last : TM0.Cfg (Fin a) (Fin q)} (transition : TM0.step machine first = some last)
+    (history : ℕ) :
+    ∃ finalHistory, history < finalHistory ∧
+      StateTransition.Reaches₁ (step (table a q machine))
+        (encode a q machine first history) (encode a q machine last finalHistory) := by
+  obtain ⟨finalHistory, grew, _, _, next, initial, rest⟩ :=
+    step_firstReturn a q machine transition history
+  exact ⟨finalHistory, grew, Relation.TransGen.head' initial
+    (Relation.ReflTransGen.mono (fun _ _ edge => edge.1) _ _ rest)⟩
+
+private theorem counter_instruction_halt {n m : ℕ} (program : Counter.Program n m)
+    (state : Counter.Configuration n m) (halted : Counter.step program state = none) :
+    program state.pc = .halt := by
+  cases instruction : program state.pc with
+  | halt => rfl
+  | inc => simp [Counter.step, instruction] at halted
+  | dec register zero nonzero =>
+      cases value : state.counters register <;> simp [Counter.step, instruction, value] at halted
+
+/-- A stopped Turing configuration enters a genuinely source-free recording dispatch. -/
+theorem source_no_outgoing_of_halt (machine : TM0.Machine (Fin a) (Fin q))
+    (state : TM0.Cfg (Fin a) (Fin q)) (history : ℕ) (halted : TM0.step machine state = none) :
+    ¬ PrimeCompression.HasSource (ReversibleTuring.table a q machine)
+      (PrimeCompression.toNatural (ReversibleTuring.encode a q machine state history)).pc := by
+  have instruction := counter_instruction_halt (NativeTuring.source2 a q machine)
+    (RecordedTuring.counterEncode a q machine state)
+    (RecordedTuring.counter_halt a q machine state halted)
+  rintro ⟨index, same⟩
+  exact Recording.halt_no_outgoing (NativeTuring.source2 a q machine)
+    (RecordedTuring.counterEncode a q machine state).pc instruction index same
+
+/-- Static halting survives compression independently of the encoded memory values. -/
+theorem no_outgoing_of_halt (machine : TM0.Machine (Fin a) (Fin q))
+    (state : TM0.Cfg (Fin a) (Fin q)) (history : ℕ) (halted : TM0.step machine state = none) :
+    ¬ ∃ index, (table a q machine index).source = (encode a q machine state history).1 :=
+  PrimeCompression.no_outgoing_boundary basis (ReversibleTuring.table a q machine)
+    (source_deterministic a q machine) (source_targetCompatible a q machine)
+    (PrimeCompression.toNatural (ReversibleTuring.encode a q machine state history)).pc
+    (source_no_outgoing_of_halt a q machine state history halted)
+
+theorem step_halt (machine : TM0.Machine (Fin a) (Fin q))
+    (state : TM0.Cfg (Fin a) (Fin q)) (history : ℕ) (halted : TM0.step machine state = none) :
+    step (table a q machine) (encode a q machine state history) = none := by
+  rw [step_none_iff]
+  rintro ⟨index, enabled⟩
+  exact no_outgoing_of_halt a q machine state history halted ⟨index, enabled.1⟩
+
+def Related (machine : TM0.Machine (Fin a) (Fin q))
+    (original : TM0.Cfg (Fin a) (Fin q)) (compiled : State 2 (size a q machine)) : Prop :=
+  ∃ history, encode a q machine original history = compiled
+
+theorem respects (machine : TM0.Machine (Fin a) (Fin q)) :
+    StateTransition.Respects (TM0.step machine) (step (table a q machine)) (Related a q machine) := by
+  intro original compiled related
+  obtain ⟨history, rfl⟩ := related
+  cases transition : TM0.step machine original with
+  | none => exact step_halt a q machine original history transition
+  | some next =>
+      obtain ⟨finalHistory, _, run⟩ := step_reaches a q machine transition history
+      exact ⟨encode a q machine next finalHistory, ⟨finalHistory, rfl⟩, run⟩
+
+theorem halting_iff (machine : TM0.Machine (Fin a) (Fin q))
+    (state : TM0.Cfg (Fin a) (Fin q)) (history : ℕ) :
+    (eval (table a q machine) (encode a q machine state history)).Dom ↔
+      (StateTransition.eval (TM0.step machine) state).Dom :=
+  StateTransition.tr_eval_dom (respects a q machine) ⟨history, rfl⟩
+
+theorem divergence_iff (machine : TM0.Machine (Fin a) (Fin q))
+    (state : TM0.Cfg (Fin a) (Fin q)) (history : ℕ) :
+    ¬ (eval (table a q machine) (encode a q machine state history)).Dom ↔
+      ¬ (StateTransition.eval (TM0.step machine) state).Dom :=
+  not_congr (halting_iff a q machine state history)
+
+/-- Complete final configurations, including their retained history, correspond exactly. -/
+theorem result_iff (machine : TM0.Machine (Fin a) (Fin q))
+    (first last : TM0.Cfg (Fin a) (Fin q)) (history : ℕ) :
+    (∃ finalHistory, encode a q machine last finalHistory ∈
+      eval (table a q machine) (encode a q machine first history)) ↔
+      last ∈ StateTransition.eval (TM0.step machine) first := by
+  constructor
+  · rintro ⟨finalHistory, finished⟩
+    obtain ⟨original, ⟨originalHistory, related⟩, source_finished⟩ :=
+      StateTransition.tr_eval_rev (respects a q machine) ⟨history, rfl⟩ finished
+    have same : (original, originalHistory) = (last, finalHistory) :=
+      @encode_injective a q _ _ machine (original, originalHistory) (last, finalHistory) related
+    have configurations : original = last := congrArg Prod.fst same
+    simpa only [configurations] using source_finished
+  · intro source_finished
+    obtain ⟨final, ⟨finalHistory, rfl⟩, finished⟩ :=
+      StateTransition.tr_eval (respects a q machine) ⟨history, rfl⟩ source_finished
+    exact ⟨finalHistory, finished⟩
+
+/-- Reversing the same finite graph restores the entire prior configuration and history. -/
+theorem step_retraces (machine : TM0.Machine (Fin a) (Fin q))
+    {first last : TM0.Cfg (Fin a) (Fin q)} (transition : TM0.step machine first = some last)
+    (history : ℕ) :
+    ∃ finalHistory, history < finalHistory ∧
+      StateTransition.Reaches (step (reverseTable (table a q machine)))
+        (encode a q machine last finalHistory) (encode a q machine first history) := by
+  obtain ⟨finalHistory, grew, run⟩ := step_reaches a q machine transition history
+  exact ⟨finalHistory, grew, reaches_reverse (table a q machine)
+    (deterministic a q machine) (targetCompatible a q machine) run.to_reflTransGen⟩
+
+end Monodromy.ReversibleTuring.Compression
+
+end
+
+/-!
+## Reversible universality by actual path lifting
+-/
+
+noncomputable section
+
+namespace Monodromy.ReversibleNativeTuring
+
+open Turing CoupledContinuation ReversibleTuring
+
+variable (a q : ℕ) [NeZero a] [NeZero q]
+
+instance size_nonzero (machine : TM0.Machine (Fin a) (Fin q)) :
+    NeZero (Compression.size a q machine) := by
+  constructor
+  have bound := (Compression.encode a q machine (TM0.init [] : TM0.Cfg (Fin a) (Fin q)) 0).1.isLt
+  omega
+
+/-- The same five geometric primitives execute the complete compressed finite table. -/
+def program (machine : TM0.Machine (Fin a) (Fin q)) :
+    Program (11 * (Compression.size a q machine + Compression.edges a q machine)) :=
+  ReversibleCompilation.haltingProgram (Compression.table a q machine)
+    (Compression.deterministic a q machine) (Compression.targetCompatible a q machine)
+
+/-- Complete source configurations and histories occupy the original three-root fiber. -/
+def iota (machine : TM0.Machine (Fin a) (Fin q))
+    (state : TM0.Cfg (Fin a) (Fin q)) (history : ℕ) : Memory :=
+  ReversibleCompilation.iota (e := Compression.edges a q machine) (Compression.encode a q machine state history)
+
+theorem iota_injective (machine : TM0.Machine (Fin a) (Fin q)) :
+    Function.Injective (fun pair : TM0.Cfg (Fin a) (Fin q) × ℕ =>
+      iota a q machine pair.1 pair.2) := by
+  intro first second same
+  apply Compression.encode_injective a q machine
+  exact ReversibleCompilation.iota_injective same
+
+/-- The same native words, with finite root marks for complete Turing steps. -/
+def boundaryProgram (machine : TM0.Machine (Fin a) (Fin q)) :
+    Program (11 * (Compression.size a q machine + Compression.edges a q machine)) :=
+  ReversibleCompilation.markedProgram (Compression.table a q machine)
+    (Compression.deterministic a q machine) (Compression.targetCompatible a q machine)
+    (Compression.mark a q machine)
+
+def Boundary (machine : TM0.Machine (Fin a) (Fin q)) (state : Memory) : Prop :=
+  (boundaryProgram a q machine).haltSignal state = 1
+
+theorem boundary_iota (machine : TM0.Machine (Fin a) (Fin q))
+    (state : TM0.Cfg (Fin a) (Fin q)) (history : ℕ) :
+    Boundary a q machine (iota a q machine state history) := by
+  apply (ReversibleCompilation.markedBoundary_iota_iff (Compression.table a q machine)
+    (Compression.deterministic a q machine) (Compression.targetCompatible a q machine)
+    (Compression.mark a q machine) _).mpr
+  exact (Compression.mark_true_iff a q machine _).mpr (Compression.boundary_encode a q machine state history)
+
+def FirstReturn (machine : TM0.Machine (Fin a) (Fin q)) (first last : Memory) : Prop :=
+  ReversibleCompilation.NativeFirstReturn (Compression.table a q machine)
+    (Compression.deterministic a q machine) (Compression.targetCompatible a q machine)
+    (Compression.mark a q machine) first last
+
+/-- A source step is precisely the next marked native word return, with its actual history. -/
+theorem step_firstReturn (machine : TM0.Machine (Fin a) (Fin q))
+    {first last : TM0.Cfg (Fin a) (Fin q)} (transition : TM0.step machine first = some last)
+    (history : ℕ) :
+    ∃ finalHistory, history < finalHistory ∧
+      FirstReturn a q machine (iota a q machine first history) (iota a q machine last finalHistory) := by
+  obtain ⟨finalHistory, grew, first_marked, last_marked, middle, initial, rest⟩ :=
+    Compression.step_firstReturn a q machine transition history
+  have inside : Relation.ReflTransGen
+      (fun current next : Counter.Reversible.State 2 (Compression.size a q machine) =>
+        Counter.Reversible.step (Compression.table a q machine) current = some next ∧
+          Compression.mark a q machine current.1 = false)
+      middle (Compression.encode a q machine last finalHistory) :=
+    Relation.ReflTransGen.mono
+      (fun current _ edge => ⟨edge.1, (Compression.mark_false_iff a q machine current).mpr edge.2⟩)
+      _ _ rest
+  exact ⟨finalHistory, grew, ReversibleCompilation.marked_firstReturn (Compression.table a q machine)
+    (Compression.deterministic a q machine) (Compression.targetCompatible a q machine)
+    (Compression.mark a q machine) initial inside
+    ((Compression.mark_true_iff a q machine _).mpr first_marked)
+    ((Compression.mark_true_iff a q machine _).mpr last_marked)⟩
+
+/-- Every source step is a positive run of actual native returns with its larger history. -/
+theorem step_reaches (machine : TM0.Machine (Fin a) (Fin q))
+    {first last : TM0.Cfg (Fin a) (Fin q)} (transition : TM0.step machine first = some last)
+    (history : ℕ) :
+    ∃ finalHistory, history < finalHistory ∧
+      StateTransition.Reaches₁ (program a q machine).step
+        (iota a q machine first history) (iota a q machine last finalHistory) := by
+  obtain ⟨finalHistory, grew, _, _, next, initial, rest⟩ :=
+    step_firstReturn a q machine transition history
+  exact ⟨finalHistory, grew, Relation.TransGen.head' initial
+    (Relation.ReflTransGen.mono (fun _ _ edge => edge.1) _ _ rest)⟩
+
+/-- Stopping is detected from the actual static halt address, without a global completeness premise. -/
+theorem step_halt (machine : TM0.Machine (Fin a) (Fin q))
+    (state : TM0.Cfg (Fin a) (Fin q)) (history : ℕ) (halted : TM0.step machine state = none) :
+    (program a q machine).step (iota a q machine state history) = none := by
+  have signal := (ReversibleCompilation.haltSignal_iota_iff (Compression.table a q machine)
+    (Compression.deterministic a q machine) (Compression.targetCompatible a q machine)
+    (Compression.encode a q machine state history)).mpr
+      (Compression.no_outgoing_of_halt a q machine state history halted)
+  change (if (program a q machine).haltSignal (iota a q machine state history) = 1 then none
+    else some ((program a q machine).advance (iota a q machine state history))) = none
+  exact ite_eq_left signal
+
+def Related (machine : TM0.Machine (Fin a) (Fin q))
+    (original : TM0.Cfg (Fin a) (Fin q)) (native : Memory) : Prop :=
+  ∃ history, iota a q machine original history = native
+
+theorem respects (machine : TM0.Machine (Fin a) (Fin q)) :
+    StateTransition.Respects (TM0.step machine) (program a q machine).step (Related a q machine) := by
+  intro original native related
+  obtain ⟨history, rfl⟩ := related
+  cases transition : TM0.step machine original with
+  | none => exact step_halt a q machine original history transition
+  | some next =>
+      obtain ⟨finalHistory, _, run⟩ := step_reaches a q machine transition history
+      exact ⟨iota a q machine next finalHistory, ⟨finalHistory, rfl⟩, run⟩
+
+theorem halting_iff (machine : TM0.Machine (Fin a) (Fin q))
+    (state : TM0.Cfg (Fin a) (Fin q)) (history : ℕ) :
+    ((program a q machine).eval (iota a q machine state history)).Dom ↔
+      (StateTransition.eval (TM0.step machine) state).Dom :=
+  StateTransition.tr_eval_dom (respects a q machine) ⟨history, rfl⟩
+
+theorem divergence_iff (machine : TM0.Machine (Fin a) (Fin q))
+    (state : TM0.Cfg (Fin a) (Fin q)) (history : ℕ) :
+    ¬ ((program a q machine).eval (iota a q machine state history)).Dom ↔
+      ¬ (StateTransition.eval (TM0.step machine) state).Dom :=
+  not_congr (halting_iff a q machine state history)
+
+/-- The entire final configuration is recovered from the native result; history remains observable. -/
+theorem result_iff (machine : TM0.Machine (Fin a) (Fin q))
+    (first last : TM0.Cfg (Fin a) (Fin q)) (history : ℕ) :
+    (∃ finalHistory, iota a q machine last finalHistory ∈
+      (program a q machine).eval (iota a q machine first history)) ↔
+      last ∈ StateTransition.eval (TM0.step machine) first := by
+  constructor
+  · rintro ⟨finalHistory, finished⟩
+    obtain ⟨original, ⟨originalHistory, related⟩, source_finished⟩ :=
+      StateTransition.tr_eval_rev (respects a q machine) ⟨history, rfl⟩ finished
+    have same : (original, originalHistory) = (last, finalHistory) :=
+      @iota_injective a q _ _ machine (original, originalHistory) (last, finalHistory) related
+    have configurations : original = last := congrArg Prod.fst same
+    simpa only [configurations] using source_finished
+  · intro source_finished
+    obtain ⟨native, ⟨finalHistory, rfl⟩, finished⟩ :=
+      StateTransition.tr_eval (respects a q machine) ⟨history, rfl⟩ source_finished
+    exact ⟨finalHistory, finished⟩
+
+/-- The inverse is another fixed word table on the same fiber and with the same five primitives. -/
+def reverseProgram (machine : TM0.Machine (Fin a) (Fin q)) :
+    Program (11 * (Compression.size a q machine + Compression.edges a q machine)) :=
+  ReversibleCompilation.reverseProgram (Compression.table a q machine)
+    (Compression.deterministic a q machine) (Compression.targetCompatible a q machine)
+
+theorem reverse_after_forward (machine : TM0.Machine (Fin a) (Fin q)) (state : Memory) :
+    (reverseProgram a q machine).advance ((program a q machine).advance state) = state :=
+  ReversibleCompilation.reverse_after_forward (Compression.table a q machine)
+    (Compression.deterministic a q machine) (Compression.targetCompatible a q machine) state
+
+theorem forward_after_reverse (machine : TM0.Machine (Fin a) (Fin q)) (state : Memory) :
+    (program a q machine).advance ((reverseProgram a q machine).advance state) = state :=
+  ReversibleCompilation.forward_after_reverse (Compression.table a q machine)
+    (Compression.deterministic a q machine) (Compression.targetCompatible a q machine) state
+
+def executionEquiv (machine : TM0.Machine (Fin a) (Fin q)) : Memory ≃ Memory :=
+  ReversibleCompilation.executionEquiv (Compression.table a q machine)
+    (Compression.deterministic a q machine) (Compression.targetCompatible a q machine)
+
+theorem program_bijective (machine : TM0.Machine (Fin a) (Fin q)) :
+    Function.Bijective (program a q machine).advance :=
+  ReversibleCompilation.haltingProgram_bijective (Compression.table a q machine)
+    (Compression.deterministic a q machine) (Compression.targetCompatible a q machine)
+
+/-- Inverse native execution restores each whole source step and its prior history. -/
+theorem step_retraces (machine : TM0.Machine (Fin a) (Fin q))
+    {first last : TM0.Cfg (Fin a) (Fin q)} (transition : TM0.step machine first = some last)
+    (history : ℕ) :
+    ∃ finalHistory, history < finalHistory ∧ ∃ count : ℕ,
+      ((reverseProgram a q machine).advance)^[count] (iota a q machine last finalHistory) =
+        iota a q machine first history := by
+  obtain ⟨finalHistory, grew, run⟩ := step_reaches a q machine transition history
+  obtain ⟨count, reached⟩ := (program a q machine).reaches_iterate_advance run.to_reflTransGen
+  refine ⟨finalHistory, grew, count, ?_⟩
+  rw [← reached]
+  exact (Function.LeftInverse.iterate (reverse_after_forward a q machine) count) _
+
+/-- Native execution determines both departure and the next internal stopping boundary. -/
+def macroStep (machine : TM0.Machine (Fin a) (Fin q)) (state : Memory) : Part (Option Memory) :=
+  ReversibleCompilation.nativeMacro (Compression.table a q machine)
+    (Compression.deterministic a q machine) (Compression.targetCompatible a q machine)
+    (Compression.mark a q machine) state
+
+/-- The inverse executes its own fixed word table and the same finite boundary observation. -/
+def reverseMacro (machine : TM0.Machine (Fin a) (Fin q)) (state : Memory) : Part Memory :=
+  Program.reverseReturn (reverseProgram a q machine) (boundaryProgram a q machine) state
+
+theorem macroStep_of_firstReturn (machine : TM0.Machine (Fin a) (Fin q))
+    {first last : Memory} (run : FirstReturn a q machine first last) :
+    macroStep a q machine first = Part.some (some last) :=
+  ReversibleCompilation.nativeMacro_of_firstReturn (Compression.table a q machine)
+    (Compression.deterministic a q machine) (Compression.targetCompatible a q machine)
+    (Compression.mark a q machine) run
+
+theorem reverseMacro_of_firstReturn (machine : TM0.Machine (Fin a) (Fin q))
+    {first last : Memory} (run : FirstReturn a q machine first last) :
+    reverseMacro a q machine last = Part.some first := by
+  obtain ⟨marked, _, after, initial, rest⟩ := run
+  exact Program.reverseReturn_of_firstReturn (program a q machine) (reverseProgram a q machine)
+    (boundaryProgram a q machine) (reverse_after_forward a q machine) initial rest marked
+
+/-- The return has a positive native length and no marked intermediate word return. -/
+theorem FirstReturn.iterates (machine : TM0.Machine (Fin a) (Fin q))
+    {first last : Memory} (run : FirstReturn a q machine first last) :
+    ReversibleReturn.FirstReturn (program a q machine).advance (Boundary a q machine) first last := by
+  obtain ⟨marked_first, marked_last, after, initial, interior⟩ := run
+  let P := program a q machine
+  exact ReversibleReturn.firstReturn_of_relation (advance := P.advance)
+    (boundary := Boundary a q machine) (transition := fun left right => P.step left = some right)
+    (fun edge => P.advance_of_step edge) initial interior marked_first marked_last
+
+/-- Reversing this native trace gives the first preceding boundary, with the same length. -/
+theorem FirstReturn.inverse_iterates (machine : TM0.Machine (Fin a) (Fin q))
+    {first last : Memory} (run : FirstReturn a q machine first last) :
+    ReversibleReturn.FirstReturn (reverseProgram a q machine).advance (Boundary a q machine) last first :=
+  ReversibleReturn.inverse_firstReturn (reverse_after_forward a q machine)
+    (FirstReturn.iterates a q machine run)
+
+/-- The two internally executed macros retain and recover the same complete configurations. -/
+theorem step_return_pair (machine : TM0.Machine (Fin a) (Fin q))
+    {first last : TM0.Cfg (Fin a) (Fin q)} (transition : TM0.step machine first = some last)
+    (history : ℕ) :
+    ∃ finalHistory, history < finalHistory ∧
+      FirstReturn a q machine (iota a q machine first history) (iota a q machine last finalHistory) ∧
+      macroStep a q machine (iota a q machine first history) =
+        Part.some (some (iota a q machine last finalHistory)) ∧
+      reverseMacro a q machine (iota a q machine last finalHistory) =
+        Part.some (iota a q machine first history) := by
+  obtain ⟨finalHistory, grew, run⟩ := step_firstReturn a q machine transition history
+  exact ⟨finalHistory, grew, run, macroStep_of_firstReturn a q machine run,
+    reverseMacro_of_firstReturn a q machine run⟩
+
+/-- Halts and live steps agree with the source optional result under the causal native macro. -/
+theorem macroStep_iota (machine : TM0.Machine (Fin a) (Fin q))
+    (state : TM0.Cfg (Fin a) (Fin q)) (history : ℕ) :
+    ∃ finalHistory,
+      macroStep a q machine (iota a q machine state history) =
+        Part.some ((TM0.step machine state).map (fun next => iota a q machine next finalHistory)) ∧
+      (TM0.step machine state ≠ none → history < finalHistory) := by
+  cases transition : TM0.step machine state with
+  | none =>
+      refine ⟨history, ?_, ?_⟩
+      · simpa only [transition, Option.map_none, macroStep] using
+          ReversibleCompilation.nativeMacro_of_halt (Compression.table a q machine)
+            (Compression.deterministic a q machine) (Compression.targetCompatible a q machine)
+            (Compression.mark a q machine) _ (step_halt a q machine state history transition)
+      · simp
+  | some next =>
+      obtain ⟨finalHistory, grew, _, completed, _⟩ := step_return_pair a q machine transition history
+      exact ⟨finalHistory, completed, fun _ => grew⟩
+
+/-- Every finite source execution, including a nonhalting prefix, is an actual native lifted path. -/
+theorem finite_run_actual_lifts (machine : TM0.Machine (Fin a) (Fin q))
+    {first last : TM0.Cfg (Fin a) (Fin q)} (history : ℕ)
+    (run : StateTransition.Reaches (TM0.step machine) first last) :
+    ∃ finalHistory, ∃ count : ℕ,
+      let initial := iota a q machine first history
+      let driver := (program a q machine).runDriver count initial
+      intermediateCurve driver initial =
+        CoupledPullback.lowerCovering.liftPath driver.restrictedPath
+          (CoupledPullback.upperProjection (restrictedState initial))
+          (driver.restrictedPath.source.trans (restrictedState_over_base initial).symm) ∧
+      restrictedTrajectory driver initial =
+        CoupledPullback.upperCovering.liftPath (intermediatePath driver initial) (restrictedState initial)
+          (intermediatePath driver initial).source ∧
+      restrictedTrajectory driver initial 1 = restrictedState (iota a q machine last finalHistory) := by
+  obtain ⟨native, ⟨finalHistory, rfl⟩, actual⟩ :=
+    StateTransition.tr_reaches (respects a q machine) ⟨history, rfl⟩ run
+  obtain ⟨count, endpoint⟩ := (program a q machine).runDriver_of_reaches actual
+  refine ⟨finalHistory, count, ?_⟩
+  dsimp only
+  refine ⟨intermediateCurve_actual_lift _ _, restrictedTrajectory_actual_lift _ _, ?_⟩
+  rw [restrictedTrajectory_end, endpoint]
+
+/-- Every completed source computation has the two actual matching cover lifts generated by execution. -/
+theorem result_actual_lifts (machine : TM0.Machine (Fin a) (Fin q))
+    {first last : TM0.Cfg (Fin a) (Fin q)} (history : ℕ)
+    (completed : last ∈ StateTransition.eval (TM0.step machine) first) :
+    ∃ finalHistory, ∃ count : ℕ,
+      let initial := iota a q machine first history
+      let driver := (program a q machine).runDriver count initial
+      intermediateCurve driver initial =
+        CoupledPullback.lowerCovering.liftPath driver.restrictedPath
+          (CoupledPullback.upperProjection (restrictedState initial))
+          (driver.restrictedPath.source.trans (restrictedState_over_base initial).symm) ∧
+      restrictedTrajectory driver initial =
+        CoupledPullback.upperCovering.liftPath (intermediatePath driver initial) (restrictedState initial)
+          (intermediatePath driver initial).source ∧
+      restrictedTrajectory driver initial 1 = restrictedState (iota a q machine last finalHistory) := by
+  exact finite_run_actual_lifts a q machine history
+    (StateTransition.mem_eval.mp completed).1
+
+/-- Complete reversible universality with endogenous forward and backward first-return macros. -/
+theorem native_universality (machine : TM0.Machine (Fin a) (Fin q)) :
+    let P := program a q machine
+    let R := reverseProgram a q machine
+    let I := iota a q machine
+    Function.Injective (fun pair : TM0.Cfg (Fin a) (Fin q) × ℕ => I pair.1 pair.2) ∧
+    (∀ state, R.advance (P.advance state) = state ∧ P.advance (R.advance state) = state) ∧
+    (∀ first last, TM0.step machine first = some last → ∀ history,
+      ∃ finalHistory, history < finalHistory ∧
+        FirstReturn a q machine (I first history) (I last finalHistory) ∧
+        macroStep a q machine (I first history) = Part.some (some (I last finalHistory)) ∧
+        reverseMacro a q machine (I last finalHistory) = Part.some (I first history)) ∧
+    (∀ state history, TM0.step machine state = none →
+      macroStep a q machine (I state history) = Part.some none) ∧
+    (∀ first last history,
+      (∃ finalHistory, I last finalHistory ∈ P.eval (I first history)) ↔
+        last ∈ StateTransition.eval (TM0.step machine) first) ∧
+    (∀ state history, (P.eval (I state history)).Dom ↔
+      (StateTransition.eval (TM0.step machine) state).Dom) ∧
+    (∀ state history, ¬ (P.eval (I state history)).Dom ↔
+      ¬ (StateTransition.eval (TM0.step machine) state).Dom) ∧
+    (∀ first last history, StateTransition.Reaches (TM0.step machine) first last →
+      ∃ finalHistory, ∃ count : ℕ,
+        let initial := I first history
+        let driver := P.runDriver count initial
+        intermediateCurve driver initial =
+          CoupledPullback.lowerCovering.liftPath driver.restrictedPath
+            (CoupledPullback.upperProjection (restrictedState initial))
+            (driver.restrictedPath.source.trans (restrictedState_over_base initial).symm) ∧
+        restrictedTrajectory driver initial =
+          CoupledPullback.upperCovering.liftPath (intermediatePath driver initial) (restrictedState initial)
+            (intermediatePath driver initial).source ∧
+        restrictedTrajectory driver initial 1 = restrictedState (I last finalHistory)) := by
+  dsimp only
+  exact ⟨iota_injective a q machine,
+    fun state => ⟨reverse_after_forward a q machine state, forward_after_reverse a q machine state⟩,
+    fun _ _ transition history => step_return_pair a q machine transition history,
+    fun state history halted => by
+      obtain ⟨finalHistory, executed, _⟩ := macroStep_iota a q machine state history
+      simpa only [halted, Option.map_none] using executed,
+    result_iff a q machine, halting_iff a q machine, divergence_iff a q machine,
+    fun _ _ history run => finite_run_actual_lifts a q machine history run⟩
+
+
+end Monodromy.ReversibleNativeTuring
+
+end

@@ -41,11 +41,15 @@ The development specifies exact geometric execution and proves its properties.
 The library defines the current execution semantics. The archived four-root
 numerical command-line demonstration belongs to the earlier finite model.
 
-The same five loops also compile locally reversible integer two-counter
-tables into a globally reversible native return map. Eleven word returns
-realize one source transition, preserving complete execution, halting, and
-divergence under an explicit completeness condition. The remaining research
-task is to construct the reversible universal source encoding.
+The same engine also simulates arbitrary finite Turing machines reversibly.
+History is retained within the two memory branches. At designated word-return
+boundaries, the forward macro reaches the complete next configuration and the
+inverse macro recovers the previous configuration and history. Both macros
+execute fixed native word tables and observe finite root marks. The forward
+and backward advances are mutual inverses on the entire geometric fiber.
+`ReversibleNativeTuring.native_universality` collects the simulation, halting,
+divergence, and actual path-lifting results. The construction and its earlier
+proof stages are preserved in [the research history](docs/history.zip).
 
 A direct analytic comparator over three real coordinates preserves the same
 programs' complete integer-lattice executions. Its scope and the reversible
@@ -54,8 +58,8 @@ construction are recorded in [the current research position](docs/NOW.md).
 ## Files
 
 `src/Monodromy/` contains the current mathematics; `src/Monodromy.lean` is its
-public entry point. `notes/` contains an independently versioned note, its complete
-review snapshot, and numbered proof companions. `docs/` contains navigation and
+public entry point. `notes/` contains an independently versioned note and its complete
+review snapshot. `docs/` contains navigation and
 research history. `paper/` preserves the frozen earlier manuscript.
 
 [Monodromy.zip](Monodromy.zip) is a source distribution of the current development,
